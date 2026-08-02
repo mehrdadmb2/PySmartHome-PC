@@ -12,22 +12,11 @@ from pathlib import Path
 def install_requirements():
     req_file = "requirements.txt"
     if not os.path.exists(req_file):
-        print("[!] requirements.txt missing")
+        print("[!] requirements.txt not found")
         sys.exit(1)
-    try:
-        import pkg_resources
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "pip", "--upgrade"])
-        import pkg_resources
-    with open(req_file, 'r') as f:
-        required = [line.strip() for line in f if line.strip()]
-    installed = {pkg.key for pkg in pkg_resources.working_set}
-    missing = [p for p in required if p.split('>=')[0].split('==')[0].lower() not in installed]
-    if missing:
-        print(f"[+] Installing missing packages: {missing}")
-        subprocess.check_call([sys.executable, "-m", "pip", "install"] + missing)
-        print("[+] Restarting...")
-        os.execv(sys.executable, ['python'] + sys.argv)
+    print("[+] Installing required packages...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file])
+    print("[+] All dependencies installed.")
 
 install_requirements()
 
