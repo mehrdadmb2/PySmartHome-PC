@@ -1,8 +1,7 @@
 /*
- * PySmartHome-PC – ESP32-S3 Sensor Node
+ * PySmartHome-PC – ESP32-S3 Node
  * IP: 192.168.1.115
- * Pins: SDA=5, SCL=4, DHT22=6
- * OLED 128x32 (I2C 0x3C)
+ * OLED 128x32, DHT22 on GPIO6
  */
 
 #include <WiFi.h>
@@ -35,17 +34,13 @@ void setup() {
   display.clearDisplay();
   display.println("WiFi...");
   display.display();
-
   WiFi.config(localIP, gateway, subnet);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) delay(500);
   dht.begin();
 
   server.on("/api/status", HTTP_GET, []() {
-    String json = "{";
-    json += "\"temp\":" + String(currentTemp, 1) + ",";
-    json += "\"humidity\":" + String(currentHum, 1);
-    json += "}";
+    String json = "{\"temp\":" + String(currentTemp,1) + ",\"humidity\":" + String(currentHum,1) + "}";
     server.send(200, "application/json", json);
   });
   server.begin();
@@ -59,8 +54,7 @@ void loop() {
     float t = dht.readTemperature();
     float h = dht.readHumidity();
     if (!isnan(t) && !isnan(h)) {
-      currentTemp = t;
-      currentHum = h;
+      currentTemp = t; currentHum = h;
       display.clearDisplay();
       display.setCursor(0,0);
       display.printf("T:%.1fC H:%.1f%%", t, h);
