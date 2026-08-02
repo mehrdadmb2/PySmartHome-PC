@@ -1,9 +1,7 @@
 /*
  * PySmartHome-PC – ESP32 Hub
  * IP: 192.168.1.119
- * Pins: SDA=5, SCL=4, DHT22=13
- * OLED 128x64 (I2C 0x3C)
- * Serves /api/status with JSON
+ * OLED 128x64, DHT22 on GPIO13
  */
 
 #include <WiFi.h>
@@ -13,14 +11,14 @@
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 
-// ---------- Network ----------
+// Network
 const char* ssid = ">><<>><<";
 const char* password = "MEHRdAd1380";
 IPAddress localIP(192, 168, 1, 119);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
 
-// ---------- Hardware ----------
+// Hardware
 #define DHTPIN 13
 #define DHTTYPE DHT22
 #define I2C_SDA 5
@@ -34,7 +32,7 @@ WebServer server(80);
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "178.22.122.100", 3.5*3600, 60000); // Iran
 
-// ---------- Persian date converter ----------
+// Persian date
 struct JalaliDate { int year, month, day; };
 JalaliDate gregorianToJalali(int gy, int gm, int gd) {
   int gy2 = (gm > 2) ? (gy + 1) : gy;
@@ -50,8 +48,7 @@ JalaliDate gregorianToJalali(int gy, int gm, int gd) {
 }
 
 float currentTemp = 0, currentHum = 0;
-char persianDate[12] = "";
-char timeStr[9] = "";
+char persianDate[12], timeStr[9];
 
 void setup() {
   Serial.begin(115200);
@@ -68,56 +65,40 @@ void setup() {
   WiFi.config(localIP, gateway, subnet);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) delay(500);
-  Serial.println("WiFi OK");
-
   timeClient.begin();
   dht.begin();
 
-  // Web server endpoint
   server.on("/api/status", HTTP_GET, []() {
-    String json = "{";
-    json += "\"temp\":" + String(currentTemp, 1) + ",";
-    json += "\"humidity\":" + String(currentHum, 1);
-    json += "}";
+    String json = "{\"temp\":" + String(currentTemp,1) + ",\"humidity\":" + String(currentHum,1) + "}";
     server.send(200, "application/json", json);
   });
   server.begin();
-  Serial.println("Web server started");
 }
 
 void loop() {
   server.handleClient();
-
   static unsigned long lastRead = 0;
   if (millis() - lastRead >= 5000) {
     lastRead = millis();
     float t = dht.readTemperature();
     float h = dht.readHumidity();
     if (!isnan(t) && !isnan(h)) {
-      currentTemp = t;
-      currentHum = h;
-
-      // Update time and Persian date
+      currentTemp = t; currentHum = h;
       timeClient.update();
       time_t now = timeClient.getEpochTime();
       struct tm *info = localtime(&now);
-      JalaliDate j = gregorianToJalali(info->tm_year + 1900, info->tm_mon + 1, info->tm_mday);
+      JalaliDate j = gregorianToJalali(info->tm_year+1900, info->tm_mon+1, info->tm_mday);
       sprintf(persianDate, "%04d/%02d/%02d", j.year, j.month, j.day);
       sprintf(timeStr, "%02d:%02d:%02d", info->tm_hour, info->tm_min, info->tm_sec);
 
-      // OLED display
       display.clearDisplay();
       display.drawRect(0, 0, 128, 64, SSD1306_WHITE);
       display.drawLine(0, 40, 128, 40, SSD1306_WHITE);
       display.setTextSize(1);
       display.setCursor(6, 10);
-      display.print("Temp: ");
-      display.print(t, 1);
-      display.print(" C");
+      display.print("Temp: "); display.print(t,1); display.print(" C");
       display.setCursor(6, 24);
-      display.print("Hum : ");
-      display.print(h, 1);
-      display.print(" %");
+      display.print("Hum : "); display.print(h,1); display.print(" %");
       display.setCursor(6, 44);
       display.print(persianDate);
       display.setCursor(72, 44);
