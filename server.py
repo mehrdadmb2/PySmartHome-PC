@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """
-PySmartHome-PC – Complete Windows Server
+PySmartHome-PC – Self-Installing Smart Home Server
+Automatically installs dependencies, sets up GitHub, schedules itself,
+polls ESP32s, serves dashboard, and pushes to GitHub.
 """
+
 import os, sys, subprocess, json, csv, time, datetime, base64
 from pathlib import Path
 
-# --- 1. Auto-install dependencies ---
+# ---------- 1. Auto-install dependencies ----------
 def install_requirements():
     req_file = "requirements.txt"
     if not os.path.exists(req_file):
-        print("[!] requirements.txt not found")
+        print("[!] requirements.txt missing")
         sys.exit(1)
     try:
         import pkg_resources
@@ -21,7 +24,7 @@ def install_requirements():
     installed = {pkg.key for pkg in pkg_resources.working_set}
     missing = [p for p in required if p.split('>=')[0].split('==')[0].lower() not in installed]
     if missing:
-        print(f"[+] Installing missing: {missing}")
+        print(f"[+] Installing missing packages: {missing}")
         subprocess.check_call([sys.executable, "-m", "pip", "install"] + missing)
         print("[+] Restarting...")
         os.execv(sys.executable, ['python'] + sys.argv)
@@ -34,7 +37,7 @@ from werkzeug.utils import secure_filename
 from apscheduler.schedulers.background import BackgroundScheduler
 import jdatetime
 
-# --- 2. Configuration ---
+# ---------- 2. Configuration ----------
 GITHUB_USER = "mehrdadmb2"
 GITHUB_REPO = "PySmartHome-PC"
 GITHUB_BRANCH = "main"
@@ -55,10 +58,10 @@ sensors = {
 }
 NODE_TIMEOUT = 600  # 10 minutes
 
-# --- 3. GitHub repository setup (first run only) ---
+# ---------- 3. GitHub setup (first run) ----------
 def check_or_create_repo():
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "User-Agent": "PySmartHome"}
-    # Check if repo exists
+    # Create repo if not exists
     r = requests.get(f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}", headers=headers)
     if r.status_code == 404:
         print("[+] Creating repository...")
@@ -66,7 +69,7 @@ def check_or_create_repo():
         requests.post("https://api.github.com/user/repos", headers=headers, json=data)
         time.sleep(2)
 
-    # Upload dashboard files if missing
+    # Upload site and docs dashboard files
     files_to_upload = {
         "site/index.html": "site/index.html",
         "site/style.css": "site/style.css",
@@ -91,12 +94,13 @@ def check_or_create_repo():
         }
         requests.put(url, headers=headers, json=data)
         time.sleep(1)
-    # Enable Pages
+
+    # Enable GitHub Pages
     pages_url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/pages"
     pages_config = {"source": {"branch": GITHUB_BRANCH, "path": "/docs"}}
     requests.post(pages_url, headers=headers, json=pages_config)
 
-# --- 4. CSV logging ---
+# ---------- 4. CSV logging ----------
 def log_to_csv(board, temp, hum):
     today = datetime.date.today().isoformat()
     filename = os.path.join(DATA_DIR, f"{board}_{today}.csv")
@@ -108,7 +112,7 @@ def log_to_csv(board, temp, hum):
         now = datetime.datetime.now().strftime("%H:%M:%S")
         writer.writerow([now, f"{temp:.1f}", f"{hum:.1f}"])
 
-# --- 5. GitHub upload ---
+# ---------- 5. GitHub upload ----------
 def upload_file_to_github(path, content):
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "User-Agent": "PySmartHome"}
@@ -133,7 +137,7 @@ def push_to_github():
                 content = f.read()
             upload_file_to_github(f"data/{fname}", content)
             time.sleep(1)
-    # Status
+    # Status JSON
     status = {
         "esp32_1_online": (time.time() - sensors["esp32_1"]["last_seen"]) < NODE_TIMEOUT,
         "esp32_s3_online": (time.time() - sensors["esp32_s3"]["last_seen"]) < NODE_TIMEOUT,
@@ -141,7 +145,7 @@ def push_to_github():
     }
     upload_file_to_github("status.json", json.dumps(status))
 
-# --- 6. Polling function (runs every 10s) ---
+# ---------- 6. Polling function ----------
 def poll_sensors():
     for name, url in [("esp32_1", ESP32_HUB_URL), ("esp32_s3", ESP32_S3_URL)]:
         try:
@@ -155,7 +159,7 @@ def poll_sensors():
         except Exception as e:
             print(f"[!] Poll {name} failed: {e}")
 
-# --- 7. Flask app ---
+# ---------- 7. Flask app ----------
 app = Flask(__name__)
 
 @app.route('/')
@@ -260,19 +264,33 @@ def delete_file():
         return 'deleted', 200
     return 'not found', 404
 
-# --- 8. Startup sequence ---
-if __name__ == '__main__':
-    print("[*] Setting up GitHub...")
-    check_or_create_repo()
+# ---------- 8. Auto-start with Windows ----------
+def create_scheduled_task():
+    """Create a Scheduled Task to run server at logon (if not exists)."""
+    task_name = "PySmartHomeServer"
+    # Check if task already exists
+    check = subprocess.run(f'schtasks /query /tn "{task_name}"', capture_output=True, text=True, shell=True)
+    if check.returncode == 0:
+        print("[*] Scheduled task already exists.")
+        return
+    bat_path = os.path.join(os.getcwd(), "start_server.bat")
+    cmd = f'schtasks /create /tn "{task_name}" /tr "{bat_path}" /sc onlogon /rl highest /f'
+    subprocess.run(cmd, shell=True)
+    print("[+] Scheduled task created. Server will start automatically at login.")
 
-    # Start scheduler for polling (every 10s) and GitHub push (every 5min)
+# ---------- 9. Startup sequence ----------
+if __name__ == '__main__':
+    print("[*] First run setup...")
+    check_or_create_repo()
+    create_scheduled_task()
+
+    # Start scheduler for polling and GitHub push
     scheduler = BackgroundScheduler()
     scheduler.add_job(poll_sensors, 'interval', seconds=10)
     scheduler.add_job(push_to_github, 'interval', minutes=5)
     scheduler.start()
 
-    # Initial poll
-    poll_sensors()
+    poll_sensors()  # initial poll
 
     print("[*] Server running on http://0.0.0.0:5000")
     app.run(host='0.0.0.0', port=5000, debug=False)
