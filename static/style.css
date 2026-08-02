@@ -1,5 +1,3 @@
-@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css');
-
 :root {
   --bg: #0a0a1a;
   --card-bg: rgba(20, 25, 45, 0.6);
@@ -10,7 +8,6 @@
   --neon-purple: #b44dff;
   --green: #0f0;
   --red: #f00;
-  --glow: 0 0 15px;
   --transition: 0.3s ease;
 }
 [data-theme="light"] {
@@ -25,16 +22,13 @@
 
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
-  font-family: 'Segoe UI', Tahoma, sans-serif;
+  font-family: Tahoma, sans-serif;
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
   overflow-x: hidden;
   transition: background var(--transition), color var(--transition);
-  position: relative;
 }
-
-/* پس‌زمینه ستاره‌ای */
 .stars {
   position: fixed; top:0; left:0; width:100%; height:100%;
   background: radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%);
@@ -44,22 +38,12 @@ body {
   content: "";
   position: absolute; width: 2px; height: 2px;
   background: transparent;
-  box-shadow: /* 100 random stars */
-    10vw 20vh #fff, 30vw 80vh #fff, 70vw 10vh #fff, 90vw 50vh #fff, 50vw 70vh #fff,
-    20vw 40vh #fff, 80vw 60vh #fff, 40vw 30vh #fff, 60vw 90vh #fff, 5vw 15vh #fff,
-    95vw 25vh #fff, 35vw 65vh #fff, 65vw 45vh #fff, 15vw 75vh #fff, 85vw 35vh #fff,
-    25vw 55vh #fff, 75vw 15vh #fff, 45vw 85vh #fff, 55vw 5vh #fff, 92vw 70vh #fff,
-    8vw 80vh #fff, 42vw 20vh #fff, 58vw 50vh #fff, 72vw 40vh #fff, 28vw 60vh #fff,
-    18vw 30vh #fff, 88vw 10vh #fff, 68vw 70vh #fff, 38vw 90vh #fff, 12vw 45vh #fff;
+  box-shadow: 10vw 20vh #fff, 30vw 80vh #fff, 70vw 10vh #fff, 90vw 50vh #fff, 50vw 70vh #fff, 20vw 40vh #fff, 80vw 60vh #fff, 40vw 30vh #fff, 60vw 90vh #fff, 5vw 15vh #fff, 95vw 25vh #fff, 35vw 65vh #fff, 65vw 45vh #fff, 15vw 75vh #fff, 85vw 35vh #fff, 25vw 55vh #fff, 75vw 15vh #fff, 45vw 85vh #fff, 55vw 5vh #fff, 92vw 70vh #fff;
   animation: twinkle 4s ease-in-out infinite alternate;
 }
 @keyframes twinkle { 0% { opacity: 0.4; } 100% { opacity: 1; } }
-
-/* شفق قطبی */
 .aurora {
-  position: fixed;
-  top: -50%; left: -50%;
-  width: 200%; height: 200%;
+  position: fixed; top: -50%; left: -50%; width: 200%; height: 200%;
   background: radial-gradient(circle at 30% 50%, rgba(180,77,255,0.15) 0%, transparent 50%),
               radial-gradient(circle at 70% 80%, rgba(0,255,255,0.1) 0%, transparent 50%),
               radial-gradient(circle at 50% 20%, rgba(255,0,255,0.08) 0%, transparent 50%);
@@ -69,24 +53,6 @@ body {
 }
 @keyframes auroraMove { 0% { transform: rotate(0deg) scale(1); } 100% { transform: rotate(360deg) scale(1.4); } }
 
-/* شناورها */
-.floating-icons { position: fixed; inset:0; pointer-events:none; z-index:0; }
-.float-icon {
-  position: absolute;
-  font-size: 1.8rem;
-  color: var(--neon-cyan);
-  opacity: 0.15;
-  animation: floatIcon 8s ease-in-out infinite;
-}
-.float-icon:nth-child(1) { animation-delay: 0s; }
-.float-icon:nth-child(2) { animation-delay: 2s; }
-.float-icon:nth-child(3) { animation-delay: 4s; }
-@keyframes floatIcon {
-  0%,100% { transform: translateY(0px) rotate(0deg); }
-  50% { transform: translateY(-20px) rotate(5deg); }
-}
-
-/* استایل‌های پایه */
 .glass {
   background: var(--card-bg);
   backdrop-filter: blur(16px);
@@ -96,15 +62,14 @@ body {
   padding: 1.2rem;
   box-shadow: 0 8px 32px rgba(0,0,0,0.3);
   transition: all 0.4s;
+  margin-bottom: 1.5rem;
 }
 .glass:hover {
   border-color: var(--neon-cyan);
   box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 20px var(--neon-cyan);
 }
 .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
-
-/* هدر */
-header { text-align: center; margin-bottom: 2rem; position: relative; }
+header { text-align: center; margin-bottom: 2rem; }
 .neon-text {
   font-size: 2.5rem;
   color: var(--neon-pink);
@@ -119,10 +84,8 @@ header { text-align: center; margin-bottom: 2rem; position: relative; }
 }
 .glass-btn:hover { border-color: var(--neon-cyan); box-shadow: 0 0 15px var(--neon-cyan); }
 
-/* نوار وضعیت نودها */
 .node-status-bar {
-  display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;
-  margin-bottom: 2rem; padding: 1rem;
+  display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-bottom: 2rem; padding: 1rem;
 }
 .node { display: flex; align-items: center; gap: 0.5rem; }
 .status-dot {
@@ -130,42 +93,23 @@ header { text-align: center; margin-bottom: 2rem; position: relative; }
   background: var(--green); box-shadow: 0 0 10px var(--green);
 }
 
-/* کارت‌ها */
 .cards-row {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 1.5rem; margin-bottom: 2rem;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;
 }
-.card { text-align: center; padding: 1.5rem; position: relative; overflow: hidden; }
-.card-icon { font-size: 2rem; color: var(--neon-purple); margin-bottom: 0.5rem; }
-.card h3 { font-size: 1.2rem; margin-bottom: 0.5rem; color: var(--neon-cyan); }
-.neon-btn {
-  background: linear-gradient(45deg, var(--neon-purple), var(--neon-cyan));
-  border: none; color: #fff; padding: 0.6rem 1.5rem; border-radius: 2rem;
-  font-weight: bold; cursor: pointer; margin-top: 0.8rem; transition: transform 0.2s, box-shadow 0.2s;
-  box-shadow: 0 4px 15px rgba(180,77,255,0.5);
-}
-.neon-btn:hover { transform: scale(1.05); box-shadow: 0 8px 25px rgba(0,255,255,0.6); }
+.card { text-align: center; padding: 1.5rem; }
+.card h3 { color: var(--neon-cyan); margin-bottom: 0.5rem; }
 
-/* نمودارها */
 .charts-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-  gap: 1.5rem; margin-bottom: 2rem;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;
 }
 .chart-card { padding: 1.5rem; }
-.chart-header {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 1rem; flex-wrap: wrap;
-}
-.chart-header h3 { color: var(--neon-pink); }
+.chart-card h3 { color: var(--neon-pink); margin-bottom: 0.5rem; }
 .range-select {
-  background: rgba(0,0,0,0.5); color: var(--text);
-  border: 1px solid var(--border); padding: 0.3rem 0.8rem; border-radius: 1rem;
-  outline: none; cursor: pointer;
+  background: rgba(0,0,0,0.5); color: var(--text); border: 1px solid var(--border);
+  padding: 0.3rem 0.8rem; border-radius: 1rem; outline: none; cursor: pointer; margin-bottom: 1rem;
 }
 
-/* جدول */
-.table-card { padding: 1.5rem; }
-.table-card h3 { color: var(--neon-pink); margin-bottom: 1rem; }
-table { width: 100%; border-collapse: collapse; }
-th, td { border: 1px solid var(--border); padding: 0.6rem; text-align: center; }
+.file-manager h2 { color: var(--neon-pink); margin-bottom: 1rem; }
+table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+th, td { border: 1px solid var(--border); padding: 0.5rem; text-align: center; }
 th { background: rgba(0,0,0,0.3); }
