@@ -32,7 +32,11 @@ GITHUB_REPO = "PySmartHome-PC"
 GITHUB_BRANCH = "main"
 GITHUB_TOKEN = ""
 with open("config.txt", "r") as f:
-    GITHUB_TOKEN = f.read().strip().split("token ")[1] if "token " in f.read() else f.read().strip()
+    content = f.read().strip()
+if "token " in content:
+    GITHUB_TOKEN = content.split("token ")[1]
+else:
+    GITHUB_TOKEN = content   # اگر توکن بدون عبارت اضافی بود
 
 ESP32_HUB_URL = "http://192.168.1.119/api/status"
 ESP32_S3_URL  = "http://192.168.1.115/api/status"
