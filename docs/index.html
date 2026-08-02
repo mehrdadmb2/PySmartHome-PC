@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>داشبورد آنلاین خانه هوشمند</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="stars"></div>
+  <div class="aurora"></div>
+  <div class="container glass">
+    <header>
+      <h1 class="neon-text">🌐 مانیتورینگ آنلاین</h1>
+      <div class="datetime" id="datetime">--</div>
+      <div class="controls">
+        <button id="theme-toggle" class="glass-btn">🌓</button>
+        <button id="lang-toggle" class="glass-btn">فا / En</button>
+      </div>
+    </header>
+
+    <div class="node-status-bar glass">
+      <div class="node"><span>🖥️ هاب</span><span class="status-dot" id="status-hub"></span></div>
+      <div class="node"><span>🌡️ سنسور S3</span><span class="status-dot" id="status-s3"></span></div>
+    </div>
+
+    <div class="cards-row">
+      <div class="glass card">
+        <h3>اتاق ۱</h3>
+        <p>🌡️ <span id="t1">--</span>°C | 💧 <span id="h1">--</span>%</p>
+        <p>میانگین امروز: <span id="avg-t1">--</span>°C / <span id="avg-h1">--</span>%</p>
+      </div>
+      <div class="glass card">
+        <h3>اتاق ۲ (S3)</h3>
+        <p>🌡️ <span id="t2">--</span>°C | 💧 <span id="h2">--</span>%</p>
+        <p>میانگین امروز: <span id="avg-t2">--</span>°C / <span id="avg-h2">--</span>%</p>
+      </div>
+    </div>
+
+    <div class="charts-grid">
+      <div class="glass chart-card">
+        <h3>نمودار اتاق ۱</h3>
+        <select class="range-select" data-board="esp32_1">
+          <option value="daily" selected>امروز</option>
+          <option value="hourly">ساعت اخیر</option>
+          <option value="weekly">هفتگی</option>
+          <option value="monthly">ماهانه</option>
+        </select>
+        <input type="date" class="date-picker" data-board="esp32_1">
+        <canvas id="chart1"></canvas>
+      </div>
+      <div class="glass chart-card">
+        <h3>نمودار اتاق ۲</h3>
+        <select class="range-select" data-board="esp32_s3">
+          <option value="daily" selected>امروز</option>
+          <option value="hourly">ساعت اخیر</option>
+          <option value="weekly">هفتگی</option>
+          <option value="monthly">ماهانه</option>
+        </select>
+        <input type="date" class="date-picker" data-board="esp32_s3">
+        <canvas id="chart2"></canvas>
+      </div>
+    </div>
+
+    <footer class="glass" style="text-align:center; margin-top:2rem;">
+      PySmartHome-PC | داده‌ها هر ۵ دقیقه به‌روز می‌شوند
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
