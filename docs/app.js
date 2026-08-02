@@ -107,7 +107,7 @@ async function updateNodeStatus() {
         dot.style.boxShadow = online ? '0 0 10px #0f0' : '0 0 5px #f00';
       }
     };
-    setDot('status-hub', d.esp32_1_online);  // هاب همان ESP32_1 است
+    setDot('status-hub', d.esp32_1_online);
     setDot('status-s3', d.esp32_s3_online);
   } catch (e) {}
 }
