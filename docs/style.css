@@ -19,7 +19,6 @@
   --neon-pink: #c300ff;
   --neon-purple: #8a2be2;
 }
-
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
   font-family: Tahoma, sans-serif;
@@ -52,7 +51,6 @@ body {
   z-index: -1;
 }
 @keyframes auroraMove { 0% { transform: rotate(0deg) scale(1); } 100% { transform: rotate(360deg) scale(1.4); } }
-
 .glass {
   background: var(--card-bg);
   backdrop-filter: blur(16px);
@@ -83,7 +81,6 @@ header { text-align: center; margin-bottom: 2rem; }
   transition: all 0.3s;
 }
 .glass-btn:hover { border-color: var(--neon-cyan); box-shadow: 0 0 15px var(--neon-cyan); }
-
 .node-status-bar {
   display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-bottom: 2rem; padding: 1rem;
 }
@@ -92,24 +89,17 @@ header { text-align: center; margin-bottom: 2rem; }
   width: 12px; height: 12px; border-radius: 50%;
   background: var(--green); box-shadow: 0 0 10px var(--green);
 }
-
 .cards-row {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;
 }
 .card { text-align: center; padding: 1.5rem; }
 .card h3 { color: var(--neon-cyan); margin-bottom: 0.5rem; }
-
 .charts-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;
 }
 .chart-card { padding: 1.5rem; }
 .chart-card h3 { color: var(--neon-pink); margin-bottom: 0.5rem; }
-.range-select {
+.range-select, .date-picker {
   background: rgba(0,0,0,0.5); color: var(--text); border: 1px solid var(--border);
   padding: 0.3rem 0.8rem; border-radius: 1rem; outline: none; cursor: pointer; margin-bottom: 1rem;
 }
-
-.file-manager h2 { color: var(--neon-pink); margin-bottom: 1rem; }
-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-th, td { border: 1px solid var(--border); padding: 0.5rem; text-align: center; }
-th { background: rgba(0,0,0,0.3); }
