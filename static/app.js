@@ -1,16 +1,24 @@
 const API = window.location.origin;
-let lang = 'fa', theme = 'dark';
+let lang = localStorage.getItem('lang') || 'fa';
+let theme = localStorage.getItem('theme') || 'dark';
 document.documentElement.setAttribute('data-theme', theme);
+document.documentElement.lang = lang;
 document.dir = lang === 'fa' ? 'rtl' : 'ltr';
+
+// Translations
+const t = {
+  fa: { title: '🏠 خانه هوشمند', room1: 'اتاق ۱', room2: 'اتاق ۲ (S3)' },
+  en: { title: '🏠 Smart Home', room1: 'Room 1', room2: 'Room 2 (S3)' }
+};
 
 // DateTime
 setInterval(async () => {
   const r = await fetch(API+'/api/datetime');
   const d = await r.json();
-  document.getElementById('datetime').textContent = `📅 ${d.shamsi} | ${d.gregorian}`;
+  document.getElementById('datetime').innerHTML = `📅 ${d.shamsi} | ${d.gregorian}`;
 }, 1000);
 
-// Sensors + averages
+// Sensors & Averages
 async function updateSensors() {
   const r = await fetch(API+'/api/current');
   const d = await r.json();
@@ -18,13 +26,14 @@ async function updateSensors() {
   document.getElementById('h1').textContent = d.esp32_1_hum.toFixed(0);
   document.getElementById('t2').textContent = d.esp32_s3_temp.toFixed(1);
   document.getElementById('h2').textContent = d.esp32_s3_hum.toFixed(0);
-  // Averages (daily)
+
+  // Daily averages
   const r1 = await fetch(API+'/api/data?board=esp32_1&range=daily');
   const data1 = await r1.json();
   if (data1.length) {
     const avgT1 = data1.reduce((s,x)=>s+x.temp,0)/data1.length;
     const avgH1 = data1.reduce((s,x)=>s+x.humidity,0)/data1.length;
-    document.getElementById('avg1').textContent = avgT1.toFixed(1);
+    document.getElementById('avg-t1').textContent = avgT1.toFixed(1);
     document.getElementById('avg-h1').textContent = avgH1.toFixed(0);
   }
   const r2 = await fetch(API+'/api/data?board=esp32_s3&range=daily');
@@ -32,7 +41,7 @@ async function updateSensors() {
   if (data2.length) {
     const avgT2 = data2.reduce((s,x)=>s+x.temp,0)/data2.length;
     const avgH2 = data2.reduce((s,x)=>s+x.humidity,0)/data2.length;
-    document.getElementById('avg2').textContent = avgT2.toFixed(1);
+    document.getElementById('avg-t2').textContent = avgT2.toFixed(1);
     document.getElementById('avg-h2').textContent = avgH2.toFixed(0);
   }
 }
@@ -52,21 +61,23 @@ async function drawChart(board, canvasId, range) {
   const r = await fetch(`${API}/api/data?board=${board}&range=${range}`);
   const data = await r.json();
   const labels = data.map(d => d.time);
+  const temps = data.map(d => d.temp);
+  const hums = data.map(d => d.humidity);
   if (charts[canvasId]) charts[canvasId].destroy();
   charts[canvasId] = new Chart(document.getElementById(canvasId), {
     type: 'line',
     data: {
       labels,
       datasets: [
-        { label: 'دما', data: data.map(d=>d.temp), borderColor:'#ff6ec7', yAxisID:'y' },
-        { label: 'رطوبت', data: data.map(d=>d.humidity), borderColor:'#0ff', yAxisID:'y1' }
+        { label: 'دما (°C)', data: temps, borderColor: '#ff6ec7', backgroundColor: 'rgba(255,110,199,0.2)', yAxisID: 'y' },
+        { label: 'رطوبت (%)', data: hums, borderColor: '#0ff', backgroundColor: 'rgba(0,255,255,0.2)', yAxisID: 'y1' }
       ]
     },
     options: {
       responsive: true,
       scales: {
-        y: { position:'left', title:{display:true, text:'دما'} },
-        y1: { position:'right', title:{display:true, text:'رطوبت'}, grid:{drawOnChartArea:false} }
+        y: { type:'linear', position:'left', title:{display:true, text:'دما'} },
+        y1: { type:'linear', position:'right', title:{display:true, text:'رطوبت'}, grid:{drawOnChartArea:false} }
       }
     }
   });
@@ -99,7 +110,7 @@ async function loadFiles() {
 document.getElementById('refresh-files').onclick = loadFiles;
 loadFiles();
 
-// Theme & Language toggles (same as before)
+// Theme & Language
 document.getElementById('theme-toggle').onclick = () => {
   theme = theme === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', theme);
