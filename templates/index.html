@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>داشبورد خانه هوشمند</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="stars"></div>
+  <div class="aurora"></div>
+  <div class="container glass">
+    <header>
+      <h1 class="neon-text">🏠 خانه هوشمند</h1>
+      <div class="datetime" id="datetime">--</div>
+      <div class="controls">
+        <button id="theme-toggle" class="glass-btn">🌓</button>
+        <button id="lang-toggle" class="glass-btn">فا / En</button>
+      </div>
+    </header>
+
+    <div class="node-status-bar glass">
+      <div class="node"><span>🖥️ هاب</span><span class="status-dot" id="status-hub"></span></div>
+      <div class="node"><span>🌡️ سنسور S3</span><span class="status-dot" id="status-s3"></span></div>
+    </div>
+
+    <div class="cards-row">
+      <div class="glass card"><h3>اتاق ۱</h3><p>🌡️ <span id="t1">--</span>°C | 💧 <span id="h1">--</span>%</p><p>میانگین: <span id="avg1">--</span>°C / <span id="avg-h1">--</span>%</p></div>
+      <div class="glass card"><h3>اتاق ۲ (S3)</h3><p>🌡️ <span id="t2">--</span>°C | 💧 <span id="h2">--</span>%</p><p>میانگین: <span id="avg2">--</span>°C / <span id="avg-h2">--</span>%</p></div>
+    </div>
+
+    <div class="charts-grid">
+      <div class="glass chart-card">
+        <h3>نمودار اتاق ۱</h3>
+        <select class="range-select" data-board="esp32_1">
+          <option value="hourly">ساعتی</option>
+          <option value="daily" selected>روزانه</option>
+          <option value="weekly">هفتگی</option>
+          <option value="monthly">ماهانه</option>
+        </select>
+        <canvas id="chart1"></canvas>
+      </div>
+      <div class="glass chart-card">
+        <h3>نمودار اتاق ۲</h3>
+        <select class="range-select" data-board="esp32_s3">
+          <option value="hourly">ساعتی</option>
+          <option value="daily" selected>روزانه</option>
+          <option value="weekly">هفتگی</option>
+          <option value="monthly">ماهانه</option>
+        </select>
+        <canvas id="chart2"></canvas>
+      </div>
+    </div>
+
+    <div class="glass file-manager">
+      <h2>📁 مدیریت فایل‌ها</h2>
+      <button id="refresh-files" class="glass-btn">🔄 بروزرسانی</button>
+      <table id="file-table"><thead><tr><th>نام</th><th>حجم (KB)</th><th>عملیات</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
