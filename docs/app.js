@@ -1,17 +1,64 @@
 const REPO_RAW = 'https://raw.githubusercontent.com/mehrdadmb2/PySmartHome-PC/main/';
-const THRESHOLD_TEMP = 35; // آستانه هشدار دما
-let currentTheme = localStorage.getItem('theme') || 'dark';
-let lang = localStorage.getItem('lang') || 'fa';
-let fontScale = 1;
-let baseFontSize = 16;
-let fullscreen = false;
+const TEMP_THRESHOLD = 35;
 
-// اعمال تم اولیه
-document.documentElement.setAttribute('data-theme', currentTheme);
-document.documentElement.style.fontSize = baseFontSize + 'px';
+let lang = localStorage.getItem('lang') || 'en';
+let theme = localStorage.getItem('theme') || 'dark';
+let currentBoard = 'esp32_1';
+let currentRange = 'daily';
+let currentDate = new Date().toISOString().slice(0,10);
+let allData = {};
+let chart;
 
-// ===================== تاریخ شمسی =====================
-function gregorianToJalali(gy, gm, gd) {
+// ===================== INITIAL SETUP =====================
+document.documentElement.setAttribute('data-theme', theme);
+document.documentElement.lang = lang;
+document.dir = lang === 'fa' ? 'rtl' : 'ltr';
+setLanguage();
+
+// ===================== PARTICLE BACKGROUND =====================
+function initParticles() {
+  const canvas = document.getElementById('particle-canvas');
+  const ctx = canvas.getContext('2d');
+  let width, height;
+  let particles = [];
+  const maxDist = 100;
+
+  function resize() {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  class Particle {
+    constructor() { this.x = Math.random()*width; this.y = Math.random()*height; this.vx = (Math.random()-0.5)*0.5; this.vy = (Math.random()-0.5)*0.5; }
+    update() { this.x += this.vx; this.y += this.vy; if(this.x<0||this.x>width) this.vx*=-1; if(this.y<0||this.y>height) this.vy*=-1; }
+    draw() { ctx.beginPath(); ctx.arc(this.x,this.y,1.5,0,Math.PI*2); ctx.fillStyle = 'rgba(0,255,255,0.5)'; ctx.fill(); }
+  }
+  for(let i=0;i<80;i++) particles.push(new Particle());
+
+  function animate() {
+    ctx.clearRect(0,0,width,height);
+    for(let i=0;i<particles.length;i++) {
+      particles[i].update(); particles[i].draw();
+      for(let j=i+1;j<particles.length;j++) {
+        const dx = particles[i].x - particles[j].x, dy = particles[i].y - particles[j].y;
+        const dist = Math.sqrt(dx*dx+dy*dy);
+        if(dist < maxDist) {
+          ctx.beginPath(); ctx.moveTo(particles[i].x, particles[i].y); ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.strokeStyle = `rgba(0,255,255,${1 - dist/maxDist})`; ctx.stroke();
+        }
+      }
+    }
+    requestAnimationFrame(animate);
+  }
+  animate();
+}
+initParticles();
+
+// ===================== HELPER FUNCTIONS =====================
+function persianDate(date) {
+  const gy = date.getFullYear(), gm = date.getMonth()+1, gd = date.getDate();
   const gy2 = (gm > 2) ? (gy + 1) : gy;
   let days = 355666 + (365 * gy) + Math.floor((gy2 + 3) / 4) - Math.floor((gy2 + 99) / 100) + Math.floor((gy2 + 399) / 400) + gd + Math.floor((153 * (gm > 2 ? (gm - 3) : (gm + 9)) + 2) / 5);
   let jy = -1595 + (33 * Math.floor(days / 12053));
@@ -23,23 +70,17 @@ function gregorianToJalali(gy, gm, gd) {
   const jd = 1 + ((days < 186) ? (days % 31) : ((days - 186) % 30));
   return { year: jy, month: jm, day: jd };
 }
-function updateDateTime() {
-  const now = new Date();
-  const j = gregorianToJalali(now.getFullYear(), now.getMonth()+1, now.getDate());
-  document.getElementById('datetime').textContent = `📅 ${j.year}/${String(j.month).padStart(2,'0')}/${String(j.day).padStart(2,'0')} ${now.toLocaleTimeString('fa-IR')}`;
-}
-setInterval(updateDateTime, 1000);
-updateDateTime();
 
-// ===================== ابزارهای کمکی =====================
-function parseTime(str) { return str.split(':').reduce((a,b) => a*60 + +b, 0); }
-function formatPersianDate(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00');
-  const j = gregorianToJalali(d.getFullYear(), d.getMonth()+1, d.getDate());
-  return `${j.year}/${j.month}/${j.day}`;
+function formatTime(date, time) {
+  const d = new Date(date + 'T' + time);
+  if (lang === 'fa') {
+    const p = persianDate(d);
+    return `${p.year}/${String(p.month).padStart(2,'0')}/${String(p.day).padStart(2,'0')} ${time}`;
+  }
+  return d.toLocaleString();
 }
 
-// ===================== Fetch CSV & داده‌ها =====================
+// ===================== DATA FETCHING =====================
 async function fetchCSV(board, date) {
   const url = REPO_RAW + 'data/' + board + '_' + date + '.csv';
   try {
@@ -55,262 +96,220 @@ async function getDataRange(board, range, endDate) {
   let dates = [];
   const end = new Date(endDate);
   if (range === 'daily') dates.push(end.toISOString().slice(0,10));
-  else if (range === 'hourly') dates.push(end.toISOString().slice(0,10));
-  else if (range === 'yesterday') {
-    const y = new Date(end); y.setDate(y.getDate()-1); dates.push(y.toISOString().slice(0,10));
-  } else if (range === 'last_week') {
-    for (let i=6; i>=0; i--) { const d = new Date(end); d.setDate(d.getDate()-i); dates.push(d.toISOString().slice(0,10)); }
-  } else if (range === 'last_month') {
-    for (let i=29; i>=0; i--) { const d = new Date(end); d.setDate(d.getDate()-i); dates.push(d.toISOString().slice(0,10)); }
-  } else {
-    const days = range === 'weekly' ? 7 : 30;
-    for (let i=days-1; i>=0; i--) {
-      const d = new Date(end); d.setDate(d.getDate()-i);
-      dates.push(d.toISOString().slice(0,10));
-    }
-  }
+  else if (range === 'yesterday') { const y = new Date(end); y.setDate(y.getDate()-1); dates.push(y.toISOString().slice(0,10)); }
+  else if (range === 'weekly') { for(let i=6;i>=0;i--) { const d=new Date(end); d.setDate(d.getDate()-i); dates.push(d.toISOString().slice(0,10)); } }
+  else if (range === 'monthly') { for(let i=29;i>=0;i--) { const d=new Date(end); d.setDate(d.getDate()-i); dates.push(d.toISOString().slice(0,10)); } }
+
   let all = [];
-  for (const date of dates) {
+  for(const date of dates) {
     const dayData = await fetchCSV(board, date);
     all = all.concat(dayData.map(d => ({...d, date})));
-  }
-  if (range === 'hourly' && all.length) {
-    const last = all[all.length-1];
-    const cutoff = parseTime(last.time) - 3600;
-    all = all.filter(d => parseTime(d.time) >= cutoff);
   }
   return all;
 }
 
-// Downsample data to maxPoints by averaging
-function downsample(data, maxPoints = 200) {
-  if (data.length <= maxPoints) return data;
-  const factor = Math.ceil(data.length / maxPoints);
-  const sampled = [];
-  for (let i = 0; i < data.length; i += factor) {
-    const chunk = data.slice(i, i + factor);
-    const avgTemp = chunk.reduce((s,x)=>s+x.temperature,0)/chunk.length;
-    const avgHum = chunk.reduce((s,x)=>s+x.humidity,0)/chunk.length;
-    sampled.push({ time: chunk[0].time, temperature: avgTemp, humidity: avgHum });
-  }
-  return sampled;
-}
+// ===================== UI UPDATES =====================
+async function updateDashboard() {
+  // Date/time
+  setInterval(() => {
+    const now = new Date();
+    const options = lang === 'fa' ? { hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false } : { hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:true };
+    document.getElementById('datetime').textContent = now.toLocaleString(lang==='fa'?'fa-IR':'en-US', options);
+  }, 1000);
 
-// ===================== مقادیر زنده و آمار =====================
-let lastPushTime = null;
-async function updateStatusAndLive() {
+  // Fetch status
   try {
     const statusResp = await fetch(REPO_RAW + 'status.json');
     const status = await statusResp.json();
-    const now = Date.now();
-    
-    // نودها
-    const updateNode = (dotId, online, lastSeenId) => {
-      const dot = document.getElementById(dotId);
-      if (dot) {
-        dot.style.background = online ? '#0f0' : '#f00';
-        dot.style.boxShadow = online ? '0 0 10px #0f0' : '0 0 5px #f00';
-      }
-      if (lastSeenId) {
-        const el = document.getElementById(lastSeenId);
-        if (el && status[dotId==='status-hub'?'esp32_1_online':'esp32_s3_online']!==undefined) {
-          // Extracting last seen not directly available, just show online status
-          el.textContent = online ? 'آنلاین' : 'آفلاین';
-        }
-      }
-    };
-    updateNode('status-hub', status.esp32_1_online, 'hub-last-seen');
-    updateNode('status-s3', status.esp32_s3_online, 's3-last-seen');
+    document.getElementById('status-hub').style.background = status.esp32_1_online ? '#0f0' : '#f00';
+    document.getElementById('status-s3').style.background = status.esp32_s3_online ? '#0f0' : '#f00';
+    document.getElementById('hub-last-seen').textContent = status.esp32_1_online ? 'Online' : 'Offline';
+    document.getElementById('s3-last-seen').textContent = status.esp32_s3_online ? 'Online' : 'Offline';
 
-    // زمان آخرین push
     if (status.last_push) {
-      lastPushTime = new Date(status.last_push);
-      const minutesAgo = Math.floor((now - lastPushTime) / 60000);
-      document.getElementById('last-update-time').textContent = `آخرین به‌روزرسانی: ${minutesAgo} دقیقه پیش`;
-      
-      // شمارش معکوس تا push بعدی
-      const nextPush = new Date(lastPushTime.getTime() + 5 * 60000);
-      const secLeft = Math.max(0, Math.floor((nextPush - now) / 1000));
-      const minLeft = Math.floor(secLeft / 60);
-      const secRem = secLeft % 60;
-      document.getElementById('next-push-countdown').textContent = `⏳ آپلود بعدی: ${minLeft}:${String(secRem).padStart(2,'0')}`;
-      
-      // هشدار تأخیر
-      const alertBanner = document.getElementById('global-alert');
-      if (minutesAgo > 15) {
-        alertBanner.textContent = '⚠️ هشدار: بیش از ۱۵ دقیقه از آخرین به‌روزرسانی گذشته است!';
-        alertBanner.classList.remove('hidden');
-      } else {
-        alertBanner.classList.add('hidden');
-      }
+      const lastPush = new Date(status.last_push);
+      document.getElementById('last-push-time').textContent = lastPush.toLocaleTimeString();
+    }
+
+    // Uptime calculation (simple: from first record today)
+    const today = new Date().toISOString().slice(0,10);
+    const hubData = await fetchCSV('esp32_1', today);
+    if (hubData.length) {
+      const firstTime = hubData[0].time;
+      const firstDate = new Date(today + 'T' + firstTime);
+      const uptimeMs = Date.now() - firstDate;
+      const hrs = Math.floor(uptimeMs / 3600000);
+      const mins = Math.floor((uptimeMs % 3600000) / 60000);
+      document.getElementById('sys-uptime').textContent = `${hrs}h ${mins}m`;
     }
   } catch(e) {}
 
-  // داده‌های امروز
+  // Room details
   const today = new Date().toISOString().slice(0,10);
-  for (let i=1; i<=2; i++) {
+  for(let i=1; i<=2; i++) {
     const board = i===1 ? 'esp32_1' : 'esp32_s3';
     const data = await fetchCSV(board, today);
     if (data.length) {
       const last = data[data.length-1];
-      const temps = data.map(d => d.temperature);
-      const hums = data.map(d => d.humidity);
-      const avgT = temps.reduce((a,b)=>a+b,0)/temps.length;
-      const avgH = hums.reduce((a,b)=>a+b,0)/hums.length;
-      const minT = Math.min(...temps);
-      const maxT = Math.max(...temps);
-      const minH = Math.min(...hums);
-      const maxH = Math.max(...hums);
-
+      const temps = data.map(d=>d.temperature);
+      const hums = data.map(d=>d.humidity);
       document.getElementById('t'+i).textContent = last.temperature.toFixed(1);
       document.getElementById('h'+i).textContent = last.humidity.toFixed(0);
-      document.getElementById('avg-t'+i).textContent = avgT.toFixed(1);
-      document.getElementById('avg-h'+i).textContent = avgH.toFixed(0);
-      document.getElementById('minmax-t'+i).textContent = `${minT.toFixed(1)} / ${maxT.toFixed(1)}`;
-      document.getElementById('minmax-h'+i).textContent = `${minH.toFixed(0)} / ${maxH.toFixed(0)}`;
+      document.getElementById('avg-t'+i).textContent = (temps.reduce((a,b)=>a+b,0)/temps.length).toFixed(1);
+      document.getElementById('avg-h'+i).textContent = (hums.reduce((a,b)=>a+b,0)/hums.length).toFixed(0);
+      document.getElementById('minmax-t'+i).textContent = `${Math.min(...temps).toFixed(1)} / ${Math.max(...temps).toFixed(1)}`;
+      document.getElementById('minmax-h'+i).textContent = `${Math.min(...hums).toFixed(0)} / ${Math.max(...hums).toFixed(0)}`;
       document.getElementById('count'+i).textContent = data.length;
 
-      // روند نسبت به دیروز
-      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0,10);
+      // Trend
+      const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
       const yesterdayData = await fetchCSV(board, yesterday);
       if (yesterdayData.length) {
         const yesterdayAvg = yesterdayData.map(d=>d.temperature).reduce((a,b)=>a+b,0)/yesterdayData.length;
-        const trend = avgT - yesterdayAvg;
+        const trend = (temps.reduce((a,b)=>a+b,0)/temps.length) - yesterdayAvg;
         const trendEl = document.getElementById('trend'+i);
-        trendEl.innerHTML = trend > 0.5 ? `📈 +${trend.toFixed(1)}°C` : (trend < -0.5 ? `📉 ${trend.toFixed(1)}°C` : '➡️ ثابت');
+        trendEl.innerHTML = trend > 0.5 ? `📈 +${trend.toFixed(1)}°C` : (trend < -0.5 ? `📉 ${trend.toFixed(1)}°C` : '➡️ Stable');
       }
-
-      // هشدار دما
-      const alertEl = document.getElementById('alert-room'+i);
-      if (maxT > THRESHOLD_TEMP) {
-        alertEl.classList.remove('hidden');
-      } else {
-        alertEl.classList.add('hidden');
+      // Alert
+      if (Math.max(...temps) > TEMP_THRESHOLD) {
+        document.getElementById('alert-room'+i).classList.remove('hidden');
       }
     }
+    document.getElementById('total-records').textContent = data.length;
   }
+
+  // Initial chart draw
+  drawChart();
 }
-setInterval(updateStatusAndLive, 60000);
-updateStatusAndLive();
+updateDashboard();
 
-// ===================== نمودارها =====================
-const charts = {};
-const chartRangeStore = {};
-const MAX_CHART_POINTS = 200;
+// ===================== CHART =====================
+async function drawChart() {
+  const board = currentBoard;
+  const range = currentRange;
+  const date = currentDate;
 
-async function drawChart(board, canvasId, range, refDate) {
-  const spinner = document.getElementById('spinner-' + canvasId);
-  spinner.classList.remove('hidden');
-  try {
-    const data = await getDataRange(board, range, refDate || new Date().toISOString().slice(0,10));
-    const sampled = downsample(data, MAX_CHART_POINTS);
-    const labels = sampled.map(d => d.time);
-    const temps = sampled.map(d => d.temperature);
-    const hums = sampled.map(d => d.humidity);
-    const avgTemp = temps.length ? temps.reduce((a,b)=>a+b,0)/temps.length : 0;
-
-    if (charts[canvasId]) charts[canvasId].destroy();
-    const ctx = document.getElementById(canvasId).getContext('2d');
-    charts[canvasId] = new Chart(ctx, {
+  if (board === 'combined') {
+    // Combined chart logic (dual axis)
+    const data1 = await getDataRange('esp32_1', range, date);
+    const data2 = await getDataRange('esp32_s3', range, date);
+    // Use Chart.js with 4 datasets
+    if (chart) chart.destroy();
+    const ctx = document.getElementById('mainChart').getContext('2d');
+    chart = new Chart(ctx, {
       type: 'line',
       data: {
-        labels,
+        labels: data1.map(d=>d.time),
         datasets: [
-          { label: 'دما (°C)', data: temps, borderColor: '#ff6ec7', backgroundColor: 'rgba(255,110,199,0.2)', yAxisID: 'y',
-            pointRadius: sampled.length > 100 ? 0 : 2 },
-          { label: 'رطوبت (%)', data: hums, borderColor: '#0ff', backgroundColor: 'rgba(0,255,255,0.2)', yAxisID: 'y1',
-            pointRadius: sampled.length > 100 ? 0 : 2 },
-          { label: 'میانگین دما', data: Array(labels.length).fill(avgTemp), borderColor: '#fff', borderDash: [5,5],
-            pointRadius: 0, yAxisID: 'y' }
+          { label: 'Room 1 Temp', data: data1.map(d=>d.temperature), borderColor: '#ff6ec7', yAxisID: 'y' },
+          { label: 'Room 2 Temp', data: data2.map(d=>d.temperature), borderColor: '#ff9900', yAxisID: 'y' },
+          { label: 'Room 1 Hum', data: data1.map(d=>d.humidity), borderColor: '#0ff', yAxisID: 'y1' },
+          { label: 'Room 2 Hum', data: data2.map(d=>d.humidity), borderColor: '#00ff99', yAxisID: 'y1' }
+        ]
+      },
+      options: { /* ... */ }
+    });
+  } else {
+    const data = await getDataRange(board, range, date);
+    if (chart) chart.destroy();
+    const ctx = document.getElementById('mainChart').getContext('2d');
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: data.map(d=>d.time),
+        datasets: [
+          { label: 'Temperature (°C)', data: data.map(d=>d.temperature), borderColor: '#ff6ec7', yAxisID: 'y', fill: true, backgroundColor: 'rgba(255,110,199,0.1)' },
+          { label: 'Humidity (%)', data: data.map(d=>d.humidity), borderColor: '#0ff', yAxisID: 'y1', fill: true, backgroundColor: 'rgba(0,255,255,0.1)' }
         ]
       },
       options: {
         responsive: true,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          tooltip: {
-            callbacks: {
-              title: (items) => {
-                if (items.length) {
-                  const idx = items[0].dataIndex;
-                  const time = sampled[idx].time;
-                  const date = sampled[idx].date;
-                  return `${formatPersianDate(date)} ${time}`;
-                }
-                return '';
-              }
-            }
-          }
-        },
+        maintainAspectRatio: false,
+        plugins: { zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } } },
         scales: {
-          y: { type:'linear', position:'left', title:{display:true, text:'دما'} },
-          y1: { type:'linear', position:'right', title:{display:true, text:'رطوبت'}, grid:{drawOnChartArea:false} }
+          y: { type:'linear', position:'left', title:{display:true, text:'Temperature'} },
+          y1: { type:'linear', position:'right', title:{display:true, text:'Humidity'}, grid:{drawOnChartArea:false} }
         }
       }
     });
-
-    // ذخیره بازه
-    chartRangeStore[board] = range;
-    localStorage.setItem('chartRange_'+board, range);
-  } catch(e) { console.error(e); }
-  spinner.classList.add('hidden');
+  }
 }
 
-// بازگردانی تنظیمات نمودار
-function restoreChartSettings() {
-  document.querySelectorAll('.range-select').forEach(sel => {
-    const board = sel.dataset.board;
-    const savedRange = localStorage.getItem('chartRange_'+board);
-    if (savedRange) sel.value = savedRange;
+// ===================== EVENT LISTENERS =====================
+document.querySelectorAll('.range-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    currentRange = btn.dataset.range;
+    drawChart();
   });
+});
+document.getElementById('board-select').addEventListener('change', (e) => {
+  currentBoard = e.target.value;
+  drawChart();
+});
+document.getElementById('chart-date').addEventListener('change', (e) => {
+  currentDate = e.target.value;
+  drawChart();
+});
+
+// Export CSV
+document.querySelectorAll('.export-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const board = btn.dataset.board;
+    const url = REPO_RAW + 'data/' + board + '_' + new Date().toISOString().slice(0,10) + '.csv';
+    window.open(url, '_blank');
+  });
+});
+
+// Modal
+document.getElementById('view-table-btn').addEventListener('click', () => {
+  document.getElementById('data-modal').classList.remove('hidden');
+  populateTable();
+});
+document.getElementById('close-modal').addEventListener('click', () => {
+  document.getElementById('data-modal').classList.add('hidden');
+});
+
+async function populateTable() {
+  const data = await getDataRange(currentBoard, currentRange, currentDate);
+  const tbody = document.querySelector('#data-table tbody');
+  tbody.innerHTML = data.map(d => `<tr><td>${d.time}</td><td>${d.temperature.toFixed(1)}</td><td>${d.humidity.toFixed(0)}</td></tr>`).join('');
 }
-restoreChartSettings();
 
-// رویدادها
-document.querySelectorAll('.range-select, .date-picker').forEach(el => {
-  el.addEventListener('change', () => {
-    const board = el.dataset.board;
-    const range = document.querySelector(`.range-select[data-board="${board}"]`).value;
-    const date = document.querySelector(`.date-picker[data-board="${board}"]`).value || new Date().toISOString().slice(0,10);
-    drawChart(board, board==='esp32_1'?'chart1':'chart2', range, date);
+document.getElementById('export-modal-csv').addEventListener('click', () => {
+  const rows = [['Time','Temperature','Humidity']];
+  document.querySelectorAll('#data-table tbody tr').forEach(row => {
+    const cells = row.querySelectorAll('td');
+    rows.push([cells[0].textContent, cells[1].textContent, cells[2].textContent]);
   });
-});
-// رسم اولیه
-document.querySelectorAll('.range-select').forEach(sel => {
-  const board = sel.dataset.board;
-  const range = sel.value;
-  drawChart(board, board==='esp32_1'?'chart1':'chart2', range, new Date().toISOString().slice(0,10));
+  const csvContent = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csvContent], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='data.csv'; a.click();
 });
 
-// ===================== تم و زبان و سایر کنترلها =====================
+// Theme/Language
 document.getElementById('theme-toggle').onclick = () => {
-  currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', currentTheme);
-  localStorage.setItem('theme', currentTheme);
+  theme = theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('theme', theme);
 };
 document.getElementById('retro-toggle').onclick = () => {
-  currentTheme = 'retro';
+  theme = 'retro';
   document.documentElement.setAttribute('data-theme', 'retro');
   localStorage.setItem('theme', 'retro');
 };
 document.getElementById('lang-toggle').onclick = () => {
-  lang = lang === 'fa' ? 'en' : 'fa';
+  lang = lang === 'en' ? 'fa' : 'en';
   document.documentElement.lang = lang;
   document.dir = lang === 'fa' ? 'rtl' : 'ltr';
   localStorage.setItem('lang', lang);
+  location.reload();
 };
 document.getElementById('fullscreen-btn').onclick = () => {
-  if (!document.fullscreenElement) {
-    document.documentElement.requestFullscreen();
-  } else {
-    document.exitFullscreen();
-  }
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+  else document.exitFullscreen();
 };
-document.getElementById('font-size-up').onclick = () => {
-  fontScale = Math.min(2, fontScale + 0.1);
-  document.documentElement.style.fontSize = (baseFontSize * fontScale) + 'px';
-};
-document.getElementById('font-size-down').onclick = () => {
-  fontScale = Math.max(0.7, fontScale - 0.1);
-  document.documentElement.style.fontSize = (baseFontSize * fontScale) + 'px';
-};
+
+function setLanguage() {
+  // Could toggle texts, but for simplicity we reload on lang change.
+}
