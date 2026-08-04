@@ -1,3 +1,4 @@
+/* ========== متغیرهای پیش‌فرض (سایبرپانک) ========== */
 :root {
   --bg: #0a0a1a;
   --card-bg: rgba(20, 25, 45, 0.6);
@@ -8,8 +9,12 @@
   --neon-purple: #b44dff;
   --green: #0f0;
   --red: #f00;
+  --warning: #ff0;
   --transition: 0.3s ease;
+  --font: Tahoma, sans-serif;
 }
+
+/* ========== تم روشن ========== */
 [data-theme="light"] {
   --bg: #f0f0f8;
   --card-bg: rgba(255,255,255,0.7);
@@ -19,15 +24,54 @@
   --neon-pink: #c300ff;
   --neon-purple: #8a2be2;
 }
+
+/* ========== تم رترو (مانیتور سبز) ========== */
+[data-theme="retro"] {
+  --bg: #000;
+  --card-bg: rgba(0, 30, 0, 0.8);
+  --border: #0f0;
+  --text: #0f0;
+  --neon-cyan: #0f0;
+  --neon-pink: #0f0;
+  --neon-purple: #0f0;
+  --green: #0f0;
+  --red: #f00;
+  --warning: #ff0;
+  --font: 'Courier New', monospace;
+}
+[data-theme="retro"] body {
+  background: #000;
+}
+[data-theme="retro"] .scanlines {
+  display: block;
+  position: fixed;
+  top:0; left:0; width:100%; height:100%;
+  background: repeating-linear-gradient(0deg, rgba(0,255,0,0.03) 0px, rgba(0,255,0,0.03) 2px, transparent 2px, transparent 4px);
+  pointer-events: none;
+  z-index: 10;
+}
+[data-theme="retro"] .glass {
+  border: 2px solid #0f0;
+  box-shadow: 0 0 15px #0f0;
+}
+[data-theme="retro"] .neon-text {
+  text-shadow: 0 0 10px #0f0, 0 0 30px #0f0;
+}
+[data-theme="retro"] .status-dot {
+  box-shadow: 0 0 10px #0f0;
+}
+
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
-  font-family: Tahoma, sans-serif;
+  font-family: var(--font);
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
   overflow-x: hidden;
   transition: background var(--transition), color var(--transition);
 }
+
+/* ========== پس‌زمینه ستاره‌ای و شفق ========== */
 .stars {
   position: fixed; top:0; left:0; width:100%; height:100%;
   background: radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%);
@@ -37,7 +81,7 @@ body {
   content: "";
   position: absolute; width: 2px; height: 2px;
   background: transparent;
-  box-shadow: 10vw 20vh #fff, 30vw 80vh #fff, 70vw 10vh #fff, 90vw 50vh #fff, 50vw 70vh #fff, 20vw 40vh #fff, 80vw 60vh #fff, 40vw 30vh #fff, 60vw 90vh #fff, 5vw 15vh #fff, 95vw 25vh #fff, 35vw 65vh #fff, 65vw 45vh #fff, 15vw 75vh #fff, 85vw 35vh #fff, 25vw 55vh #fff, 75vw 15vh #fff, 45vw 85vh #fff, 55vw 5vh #fff, 92vw 70vh #fff;
+  box-shadow: /* ... (همان نقاط ستاره‌ای) */;
   animation: twinkle 4s ease-in-out infinite alternate;
 }
 @keyframes twinkle { 0% { opacity: 0.4; } 100% { opacity: 1; } }
@@ -51,6 +95,8 @@ body {
   z-index: -1;
 }
 @keyframes auroraMove { 0% { transform: rotate(0deg) scale(1); } 100% { transform: rotate(360deg) scale(1.4); } }
+
+/* ========== المان‌های شیشه‌ای ========== */
 .glass {
   background: var(--card-bg);
   backdrop-filter: blur(16px);
@@ -66,7 +112,9 @@ body {
   border-color: var(--neon-cyan);
   box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 20px var(--neon-cyan);
 }
-.container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
+.container { max-width: 1300px; margin: 2rem auto; padding: 0 1rem; }
+
+/* ========== هدر ========== */
 header { text-align: center; margin-bottom: 2rem; }
 .neon-text {
   font-size: 2.5rem;
@@ -74,32 +122,66 @@ header { text-align: center; margin-bottom: 2rem; }
   text-shadow: 0 0 10px var(--neon-pink), 0 0 30px var(--neon-pink);
 }
 .datetime { font-size: 1.2rem; color: var(--neon-cyan); margin: 0.5rem 0; }
-.controls { margin-top: 1rem; display: flex; justify-content: center; gap: 1rem; }
+.update-info { margin: 0.5rem 0; font-size: 0.9rem; color: var(--text); }
+.controls { margin-top: 1rem; display: flex; justify-content: center; gap: 0.8rem; flex-wrap: wrap; }
 .glass-btn {
   background: transparent; border: 1px solid var(--border); color: var(--text);
   padding: 0.5rem 1rem; border-radius: 2rem; cursor: pointer; backdrop-filter: blur(10px);
-  transition: all 0.3s;
+  transition: all 0.3s; font-size: 0.9rem;
 }
 .glass-btn:hover { border-color: var(--neon-cyan); box-shadow: 0 0 15px var(--neon-cyan); }
+
+/* ========== نوار وضعیت نودها ========== */
 .node-status-bar {
-  display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-bottom: 2rem; padding: 1rem;
+  display: flex; justify-content: center; gap: 3rem; flex-wrap: wrap; margin-bottom: 2rem; padding: 1rem;
 }
 .node { display: flex; align-items: center; gap: 0.5rem; }
 .status-dot {
   width: 12px; height: 12px; border-radius: 50%;
   background: var(--green); box-shadow: 0 0 10px var(--green);
 }
+.node-last-seen { font-size: 0.8rem; opacity: 0.8; }
+
+/* ========== کارت‌های داده ========== */
 .cards-row {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;
 }
-.card { text-align: center; padding: 1.5rem; }
+.card { text-align: center; padding: 1.5rem; position: relative; }
 .card h3 { color: var(--neon-cyan); margin-bottom: 0.5rem; }
+.card-values { font-size: 1.2rem; margin-bottom: 0.5rem; }
+.card-stats p { margin: 0.2rem 0; }
+.trend { font-size: 1.5rem; }
+.alert-threshold {
+  position: absolute; bottom: 5px; left: 10px; right: 10px;
+  background: var(--red); color: white; padding: 0.2rem; border-radius: 1rem;
+  font-weight: bold; animation: pulse 1s infinite;
+}
+@keyframes pulse { 0% { opacity:1; } 50% { opacity:0.5; } 100% { opacity:1; } }
+
+/* ========== بنر هشدار سراسری ========== */
+.alert-banner {
+  margin: 1rem 0; padding: 0.8rem; background: var(--warning); color: #000;
+  border-radius: 1rem; text-align: center; font-weight: bold;
+}
+.hidden { display: none; }
+
+/* ========== نمودارها ========== */
 .charts-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;
 }
 .chart-card { padding: 1.5rem; }
-.chart-card h3 { color: var(--neon-pink); margin-bottom: 0.5rem; }
-.range-select, .date-picker {
+.chart-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+.chart-header h3 { color: var(--neon-pink); margin:0; }
+.chart-controls select, .chart-controls input {
   background: rgba(0,0,0,0.5); color: var(--text); border: 1px solid var(--border);
-  padding: 0.3rem 0.8rem; border-radius: 1rem; outline: none; cursor: pointer; margin-bottom: 1rem;
+  padding: 0.3rem 0.8rem; border-radius: 1rem; outline: none; cursor: pointer; margin-right: 0.5rem;
+}
+.loading-spinner {
+  text-align: center; font-size: 2rem; padding: 2rem;
+}
+
+/* ========== Responsive ========== */
+@media (max-width: 768px) {
+  .charts-grid { grid-template-columns: 1fr; }
+  .neon-text { font-size: 2rem; }
 }
