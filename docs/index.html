@@ -1,126 +1,176 @@
 <!DOCTYPE html>
-<html lang="fa" dir="rtl" data-theme="dark">
+<html lang="en" dir="ltr" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>داشبورد آنلاین خانه هوشمند</title>
+  <title>Smart Home Monitor | Online Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="stars"></div>
-  <div class="aurora"></div>
-  <div class="scanlines"></div> <!-- افکت رترو -->
+  <!-- پس‌زمینه ذرات -->
+  <canvas id="particle-canvas"></canvas>
 
-  <div class="container glass">
-    <header>
-      <h1 class="neon-text">🌐 مانیتورینگ آنلاین</h1>
-      <div class="datetime" id="datetime">--</div>
-      <div class="update-info">
-        <span id="last-update-time">--</span>
-        <span id="next-push-countdown"></span>
-      </div>
-      <div id="global-alert" class="alert-banner hidden"></div>
-      <div class="controls">
-        <button id="theme-toggle" class="glass-btn">🌓</button>
-        <button id="retro-toggle" class="glass-btn">🕹️ رترو</button>
-        <button id="lang-toggle" class="glass-btn">فا / En</button>
-        <button id="fullscreen-btn" class="glass-btn">⛶</button>
-        <button id="font-size-up" class="glass-btn">A+</button>
-        <button id="font-size-down" class="glass-btn">A-</button>
-      </div>
-    </header>
+  <!-- هدر ثابت -->
+  <header class="glass sticky-header">
+    <div class="header-left">
+      <h1 class="neon-text">SmartHome Monitor</h1>
+    </div>
+    <div class="header-right">
+      <span class="datetime" id="datetime">--</span>
+      <button id="theme-toggle" class="icon-btn" title="Dark/Light">🌓</button>
+      <button id="retro-toggle" class="icon-btn" title="Retro Mode">🕹️</button>
+      <button id="lang-toggle" class="icon-btn" title="Persian/English">فا</button>
+      <button id="fullscreen-btn" class="icon-btn" title="Fullscreen">⛶</button>
+    </div>
+  </header>
 
+  <main class="container">
+    <!-- نوار وضعیت نودها -->
     <div class="node-status-bar glass">
       <div class="node">
-        <span>🖥️ هاب</span>
+        <span class="node-icon">🖥️</span>
+        <span class="node-label">Hub (ESP32)</span>
         <span class="status-dot" id="status-hub"></span>
-        <span class="node-last-seen" id="hub-last-seen"></span>
+        <span class="node-last-seen" id="hub-last-seen">Online</span>
       </div>
       <div class="node">
-        <span>🌡️ سنسور S3</span>
+        <span class="node-icon">🌡️</span>
+        <span class="node-label">Sensor S3</span>
         <span class="status-dot" id="status-s3"></span>
-        <span class="node-last-seen" id="s3-last-seen"></span>
+        <span class="node-last-seen" id="s3-last-seen">Online</span>
       </div>
     </div>
 
-    <div class="cards-row">
-      <div class="glass card" id="card-room1">
-        <h3>اتاق ۱</h3>
-        <div class="card-values">
-          <span class="temp-value">🌡️ <span id="t1">--</span>°C</span>
-          <span class="hum-value">💧 <span id="h1">--</span>%</span>
+    <!-- کارت‌های آمار کلی -->
+    <div class="stats-grid">
+      <div class="glass stat-card">
+        <div class="stat-icon">⏱️</div>
+        <div class="stat-content">
+          <h3>System Uptime</h3>
+          <p id="sys-uptime">--</p>
         </div>
-        <div class="card-stats">
-          <p>میانگین: <span id="avg-t1">--</span>°C / <span id="avg-h1">--</span>%</p>
-          <p>کمینه / بیشینه: <span id="minmax-t1">--</span>°C / <span id="minmax-h1">--</span>%</p>
-          <p>تعداد ثبت: <span id="count1">--</span></p>
-          <div class="trend" id="trend1"></div>
-        </div>
-        <div class="alert-threshold hidden" id="alert-room1">⚠️ هشدار دما!</div>
       </div>
-      <div class="glass card" id="card-room2">
-        <h3>اتاق ۲ (S3)</h3>
-        <div class="card-values">
-          <span class="temp-value">🌡️ <span id="t2">--</span>°C</span>
-          <span class="hum-value">💧 <span id="h2">--</span>%</span>
+      <div class="glass stat-card">
+        <div class="stat-icon">📡</div>
+        <div class="stat-content">
+          <h3>Last Push</h3>
+          <p id="last-push-time">--</p>
         </div>
-        <div class="card-stats">
-          <p>میانگین: <span id="avg-t2">--</span>°C / <span id="avg-h2">--</span>%</p>
-          <p>کمینه / بیشینه: <span id="minmax-t2">--</span>°C / <span id="minmax-h2">--</span>%</p>
-          <p>تعداد ثبت: <span id="count2">--</span></p>
-          <div class="trend" id="trend2"></div>
+      </div>
+      <div class="glass stat-card">
+        <div class="stat-icon">📊</div>
+        <div class="stat-content">
+          <h3>Today's Records</h3>
+          <p id="total-records">--</p>
         </div>
-        <div class="alert-threshold hidden" id="alert-room2">⚠️ هشدار دما!</div>
       </div>
     </div>
 
-    <div class="charts-grid">
-      <div class="glass chart-card">
-        <div class="chart-header">
-          <h3>نمودار اتاق ۱</h3>
-          <div class="chart-controls">
-            <select class="range-select" data-board="esp32_1">
-              <option value="daily" selected>امروز</option>
-              <option value="hourly">ساعت اخیر</option>
-              <option value="weekly">هفتگی</option>
-              <option value="monthly">ماهانه</option>
-              <option value="yesterday">دیروز</option>
-              <option value="last_week">هفته قبل</option>
-              <option value="last_month">ماه قبل</option>
-            </select>
-            <input type="date" class="date-picker" data-board="esp32_1">
+    <!-- کارت‌های هر اتاق -->
+    <div class="rooms-grid">
+      <!-- اتاق ۱ -->
+      <div class="glass room-card" id="room1-card">
+        <div class="room-header">
+          <h3>Room 1 (Hub)</h3>
+          <span class="alert-badge hidden" id="alert-room1">⚠️</span>
+        </div>
+        <div class="room-values">
+          <div class="value-box">
+            <span class="value-label">Temperature</span>
+            <span class="value-number" id="t1">--</span><span class="value-unit">°C</span>
+          </div>
+          <div class="value-box">
+            <span class="value-label">Humidity</span>
+            <span class="value-number" id="h1">--</span><span class="value-unit">%</span>
           </div>
         </div>
-        <canvas id="chart1"></canvas>
-        <div class="loading-spinner hidden" id="spinner-chart1">⏳</div>
+        <div class="room-stats">
+          <p>Avg: <span id="avg-t1">--</span>°C / <span id="avg-h1">--</span>%</p>
+          <p>Min/Max: <span id="minmax-t1">--</span>°C / <span id="minmax-h1">--</span>%</p>
+          <p>Samples: <span id="count1">--</span></p>
+          <p class="trend" id="trend1"></p>
+        </div>
+        <button class="btn btn-small export-btn" data-board="esp32_1">📥 Export CSV</button>
       </div>
-      <div class="glass chart-card">
-        <div class="chart-header">
-          <h3>نمودار اتاق ۲</h3>
-          <div class="chart-controls">
-            <select class="range-select" data-board="esp32_s3">
-              <option value="daily" selected>امروز</option>
-              <option value="hourly">ساعت اخیر</option>
-              <option value="weekly">هفتگی</option>
-              <option value="monthly">ماهانه</option>
-              <option value="yesterday">دیروز</option>
-              <option value="last_week">هفته قبل</option>
-              <option value="last_month">ماه قبل</option>
-            </select>
-            <input type="date" class="date-picker" data-board="esp32_s3">
+
+      <!-- اتاق ۲ -->
+      <div class="glass room-card" id="room2-card">
+        <div class="room-header">
+          <h3>Room 2 (S3)</h3>
+          <span class="alert-badge hidden" id="alert-room2">⚠️</span>
+        </div>
+        <div class="room-values">
+          <div class="value-box">
+            <span class="value-label">Temperature</span>
+            <span class="value-number" id="t2">--</span><span class="value-unit">°C</span>
+          </div>
+          <div class="value-box">
+            <span class="value-label">Humidity</span>
+            <span class="value-number" id="h2">--</span><span class="value-unit">%</span>
           </div>
         </div>
-        <canvas id="chart2"></canvas>
-        <div class="loading-spinner hidden" id="spinner-chart2">⏳</div>
+        <div class="room-stats">
+          <p>Avg: <span id="avg-t2">--</span>°C / <span id="avg-h2">--</span>%</p>
+          <p>Min/Max: <span id="minmax-t2">--</span>°C / <span id="minmax-h2">--</span>%</p>
+          <p>Samples: <span id="count2">--</span></p>
+          <p class="trend" id="trend2"></p>
+        </div>
+        <button class="btn btn-small export-btn" data-board="esp32_s3">📥 Export CSV</button>
       </div>
     </div>
 
-    <footer class="glass" style="text-align:center; margin-top:2rem;">
-      PySmartHome-PC | داده‌ها هر ۵ دقیقه به‌روز می‌شوند
-    </footer>
-  </div>
+    <!-- کنترل‌های نمودار -->
+    <div class="chart-controls glass">
+      <div class="control-group">
+        <label for="board-select">Sensor:</label>
+        <select id="board-select">
+          <option value="esp32_1">Room 1</option>
+          <option value="esp32_s3">Room 2</option>
+          <option value="combined">Combined</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label>Range:</label>
+        <button class="btn btn-small range-btn" data-range="daily">Today</button>
+        <button class="btn btn-small range-btn" data-range="yesterday">Yesterday</button>
+        <button class="btn btn-small range-btn" data-range="weekly">Week</button>
+        <button class="btn btn-small range-btn" data-range="monthly">Month</button>
+        <input type="date" class="date-picker" id="chart-date">
+      </div>
+      <div class="control-group">
+        <button class="btn btn-small" id="view-table-btn">📋 View Data Table</button>
+      </div>
+    </div>
 
+    <!-- نمودار -->
+    <div class="glass chart-card">
+      <div class="loading-skeleton hidden" id="chart-skeleton"></div>
+      <canvas id="mainChart"></canvas>
+    </div>
+
+    <!-- مودال جدول داده -->
+    <div class="modal hidden" id="data-modal">
+      <div class="modal-content glass">
+        <span class="modal-close" id="close-modal">&times;</span>
+        <h2>Raw Data</h2>
+        <div class="table-container">
+          <table id="data-table">
+            <thead><tr><th>Time</th><th>Temperature</th><th>Humidity</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <button class="btn" id="export-modal-csv">📥 Download as CSV</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- کتابخانه‌ها -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
   <script src="app.js"></script>
 </body>
