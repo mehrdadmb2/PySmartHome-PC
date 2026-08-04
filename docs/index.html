@@ -9,56 +9,109 @@
 <body>
   <div class="stars"></div>
   <div class="aurora"></div>
+  <div class="scanlines"></div> <!-- افکت رترو -->
+
   <div class="container glass">
     <header>
       <h1 class="neon-text">🌐 مانیتورینگ آنلاین</h1>
       <div class="datetime" id="datetime">--</div>
+      <div class="update-info">
+        <span id="last-update-time">--</span>
+        <span id="next-push-countdown"></span>
+      </div>
+      <div id="global-alert" class="alert-banner hidden"></div>
       <div class="controls">
         <button id="theme-toggle" class="glass-btn">🌓</button>
+        <button id="retro-toggle" class="glass-btn">🕹️ رترو</button>
         <button id="lang-toggle" class="glass-btn">فا / En</button>
+        <button id="fullscreen-btn" class="glass-btn">⛶</button>
+        <button id="font-size-up" class="glass-btn">A+</button>
+        <button id="font-size-down" class="glass-btn">A-</button>
       </div>
     </header>
 
     <div class="node-status-bar glass">
-      <div class="node"><span>🖥️ هاب</span><span class="status-dot" id="status-hub"></span></div>
-      <div class="node"><span>🌡️ سنسور S3</span><span class="status-dot" id="status-s3"></span></div>
+      <div class="node">
+        <span>🖥️ هاب</span>
+        <span class="status-dot" id="status-hub"></span>
+        <span class="node-last-seen" id="hub-last-seen"></span>
+      </div>
+      <div class="node">
+        <span>🌡️ سنسور S3</span>
+        <span class="status-dot" id="status-s3"></span>
+        <span class="node-last-seen" id="s3-last-seen"></span>
+      </div>
     </div>
 
     <div class="cards-row">
-      <div class="glass card">
+      <div class="glass card" id="card-room1">
         <h3>اتاق ۱</h3>
-        <p>🌡️ <span id="t1">--</span>°C | 💧 <span id="h1">--</span>%</p>
-        <p>میانگین امروز: <span id="avg-t1">--</span>°C / <span id="avg-h1">--</span>%</p>
+        <div class="card-values">
+          <span class="temp-value">🌡️ <span id="t1">--</span>°C</span>
+          <span class="hum-value">💧 <span id="h1">--</span>%</span>
+        </div>
+        <div class="card-stats">
+          <p>میانگین: <span id="avg-t1">--</span>°C / <span id="avg-h1">--</span>%</p>
+          <p>کمینه / بیشینه: <span id="minmax-t1">--</span>°C / <span id="minmax-h1">--</span>%</p>
+          <p>تعداد ثبت: <span id="count1">--</span></p>
+          <div class="trend" id="trend1"></div>
+        </div>
+        <div class="alert-threshold hidden" id="alert-room1">⚠️ هشدار دما!</div>
       </div>
-      <div class="glass card">
+      <div class="glass card" id="card-room2">
         <h3>اتاق ۲ (S3)</h3>
-        <p>🌡️ <span id="t2">--</span>°C | 💧 <span id="h2">--</span>%</p>
-        <p>میانگین امروز: <span id="avg-t2">--</span>°C / <span id="avg-h2">--</span>%</p>
+        <div class="card-values">
+          <span class="temp-value">🌡️ <span id="t2">--</span>°C</span>
+          <span class="hum-value">💧 <span id="h2">--</span>%</span>
+        </div>
+        <div class="card-stats">
+          <p>میانگین: <span id="avg-t2">--</span>°C / <span id="avg-h2">--</span>%</p>
+          <p>کمینه / بیشینه: <span id="minmax-t2">--</span>°C / <span id="minmax-h2">--</span>%</p>
+          <p>تعداد ثبت: <span id="count2">--</span></p>
+          <div class="trend" id="trend2"></div>
+        </div>
+        <div class="alert-threshold hidden" id="alert-room2">⚠️ هشدار دما!</div>
       </div>
     </div>
 
     <div class="charts-grid">
       <div class="glass chart-card">
-        <h3>نمودار اتاق ۱</h3>
-        <select class="range-select" data-board="esp32_1">
-          <option value="daily" selected>امروز</option>
-          <option value="hourly">ساعت اخیر</option>
-          <option value="weekly">هفتگی</option>
-          <option value="monthly">ماهانه</option>
-        </select>
-        <input type="date" class="date-picker" data-board="esp32_1">
+        <div class="chart-header">
+          <h3>نمودار اتاق ۱</h3>
+          <div class="chart-controls">
+            <select class="range-select" data-board="esp32_1">
+              <option value="daily" selected>امروز</option>
+              <option value="hourly">ساعت اخیر</option>
+              <option value="weekly">هفتگی</option>
+              <option value="monthly">ماهانه</option>
+              <option value="yesterday">دیروز</option>
+              <option value="last_week">هفته قبل</option>
+              <option value="last_month">ماه قبل</option>
+            </select>
+            <input type="date" class="date-picker" data-board="esp32_1">
+          </div>
+        </div>
         <canvas id="chart1"></canvas>
+        <div class="loading-spinner hidden" id="spinner-chart1">⏳</div>
       </div>
       <div class="glass chart-card">
-        <h3>نمودار اتاق ۲</h3>
-        <select class="range-select" data-board="esp32_s3">
-          <option value="daily" selected>امروز</option>
-          <option value="hourly">ساعت اخیر</option>
-          <option value="weekly">هفتگی</option>
-          <option value="monthly">ماهانه</option>
-        </select>
-        <input type="date" class="date-picker" data-board="esp32_s3">
+        <div class="chart-header">
+          <h3>نمودار اتاق ۲</h3>
+          <div class="chart-controls">
+            <select class="range-select" data-board="esp32_s3">
+              <option value="daily" selected>امروز</option>
+              <option value="hourly">ساعت اخیر</option>
+              <option value="weekly">هفتگی</option>
+              <option value="monthly">ماهانه</option>
+              <option value="yesterday">دیروز</option>
+              <option value="last_week">هفته قبل</option>
+              <option value="last_month">ماه قبل</option>
+            </select>
+            <input type="date" class="date-picker" data-board="esp32_s3">
+          </div>
+        </div>
         <canvas id="chart2"></canvas>
+        <div class="loading-spinner hidden" id="spinner-chart2">⏳</div>
       </div>
     </div>
 
