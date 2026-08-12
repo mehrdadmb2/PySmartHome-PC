@@ -1,23 +1,18 @@
 #!/usr/bin/env python3
 """
-PySmartHome-PC – Self-Installing Smart Home Server
-Automatically installs dependencies, sets up GitHub, schedules itself,
-polls ESP32s, serves dashboard, and pushes to GitHub.
+PySmartHome-PC – Smart Home Server with Power Outage Schedule
 """
 
-import os, sys, subprocess, json, csv, time, datetime, base64
+import os, sys, subprocess, json, csv, time, datetime, base64, shutil
 from pathlib import Path
 
-# ---------- 1. Auto-install dependencies ----------
+# ---------- 1. Install dependencies ----------
 def install_requirements():
     req_file = "requirements.txt"
     if not os.path.exists(req_file):
         print("[!] requirements.txt not found")
         sys.exit(1)
-    print("[+] Installing required packages...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file])
-    print("[+] All dependencies installed.")
-
 install_requirements()
 
 import requests
@@ -32,17 +27,23 @@ GITHUB_REPO = "PySmartHome-PC"
 GITHUB_BRANCH = "main"
 GITHUB_TOKEN = ""
 with open("config.txt", "r") as f:
-    content = f.read().strip()
-if "token " in content:
-    GITHUB_TOKEN = content.split("token ")[1]
-else:
-    GITHUB_TOKEN = content   # اگر توکن بدون عبارت اضافی بود
+    GITHUB_TOKEN = f.read().strip().split("token ")[1] if "token " in f.read() else f.read().strip()
 
 ESP32_HUB_URL = "http://192.168.1.119/api/status"
 ESP32_S3_URL  = "http://192.168.1.115/api/status"
 
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
+
+OUTAGE_FILE = "outage_schedule.json"
+outage_schedule = {}
+if os.path.exists(OUTAGE_FILE):
+    with open(OUTAGE_FILE, "r", encoding="utf-8") as f:
+        outage_schedule = json.load(f)
+
+def save_outage():
+    with open(OUTAGE_FILE, "w", encoding="utf-8") as f:
+        json.dump(outage_schedule, f, indent=2)
 
 # Sensor state
 sensors = {
@@ -51,61 +52,7 @@ sensors = {
 }
 NODE_TIMEOUT = 600  # 10 minutes
 
-# ---------- 3. GitHub setup (first run) ----------
-def check_or_create_repo():
-    headers = {"Authorization": f"token {GITHUB_TOKEN}", "User-Agent": "PySmartHome"}
-    # Create repo if not exists
-    r = requests.get(f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}", headers=headers)
-    if r.status_code == 404:
-        print("[+] Creating repository...")
-        data = {"name": GITHUB_REPO, "description": "Smart Home PC Server", "auto_init": True}
-        requests.post("https://api.github.com/user/repos", headers=headers, json=data)
-        time.sleep(2)
-
-    # Upload site and docs dashboard files
-    files_to_upload = {
-        "site/index.html": "site/index.html",
-        "site/style.css": "site/style.css",
-        "site/app.js": "site/app.js",
-        "docs/index.html": "docs/index.html",
-        "docs/style.css": "docs/style.css",
-        "docs/app.js": "docs/app.js",
-    }
-    for local, remote in files_to_upload.items():
-        if not os.path.exists(local):
-            continue
-        url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{remote}"
-        resp = requests.get(url, headers=headers)
-        if resp.status_code == 200:
-            continue  # already exists
-        with open(local, "r", encoding="utf-8") as f:
-            content = f.read()
-        data = {
-            "message": f"Add {remote}",
-            "content": base64.b64encode(content.encode()).decode(),
-            "branch": GITHUB_BRANCH
-        }
-        requests.put(url, headers=headers, json=data)
-        time.sleep(1)
-
-    # Enable GitHub Pages
-    pages_url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/pages"
-    pages_config = {"source": {"branch": GITHUB_BRANCH, "path": "/docs"}}
-    requests.post(pages_url, headers=headers, json=pages_config)
-
-# ---------- 4. CSV logging ----------
-def log_to_csv(board, temp, hum):
-    today = datetime.date.today().isoformat()
-    filename = os.path.join(DATA_DIR, f"{board}_{today}.csv")
-    file_exists = os.path.isfile(filename)
-    with open(filename, "a", newline="") as f:
-        writer = csv.writer(f)
-        if not file_exists:
-            writer.writerow(["time", "temperature", "humidity"])
-        now = datetime.datetime.now().strftime("%H:%M:%S")
-        writer.writerow([now, f"{temp:.1f}", f"{hum:.1f}"])
-
-# ---------- 5. GitHub upload ----------
+# ---------- 3. GitHub helpers ----------
 def upload_file_to_github(path, content):
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "User-Agent": "PySmartHome"}
@@ -130,15 +77,30 @@ def push_to_github():
                 content = f.read()
             upload_file_to_github(f"data/{fname}", content)
             time.sleep(1)
-    # Status JSON
+    # Status
     status = {
         "esp32_1_online": (time.time() - sensors["esp32_1"]["last_seen"]) < NODE_TIMEOUT,
         "esp32_s3_online": (time.time() - sensors["esp32_s3"]["last_seen"]) < NODE_TIMEOUT,
         "last_push": datetime.datetime.now().isoformat()
     }
     upload_file_to_github("status.json", json.dumps(status))
+    # Outage schedule
+    with open(OUTAGE_FILE, "r", encoding="utf-8") as f:
+        upload_file_to_github(OUTAGE_FILE, f.read())
 
-# ---------- 6. Polling function ----------
+# ---------- 4. CSV logging ----------
+def log_to_csv(board, temp, hum):
+    today = datetime.date.today().isoformat()
+    filename = os.path.join(DATA_DIR, f"{board}_{today}.csv")
+    file_exists = os.path.isfile(filename)
+    with open(filename, "a", newline="") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(["time", "temperature", "humidity"])
+        now = datetime.datetime.now().strftime("%H:%M:%S")
+        writer.writerow([now, f"{temp:.1f}", f"{hum:.1f}"])
+
+# ---------- 5. Sensor polling ----------
 def poll_sensors():
     for name, url in [("esp32_1", ESP32_HUB_URL), ("esp32_s3", ESP32_S3_URL)]:
         try:
@@ -152,7 +114,7 @@ def poll_sensors():
         except Exception as e:
             print(f"[!] Poll {name} failed: {e}")
 
-# ---------- 7. Flask app ----------
+# ---------- 6. Flask app ----------
 app = Flask(__name__)
 
 @app.route('/')
@@ -214,6 +176,24 @@ def current_datetime():
         'shamsi': jalali.strftime('%Y/%m/%d %H:%M:%S')
     })
 
+# ---------- Power Outage ----------
+@app.route('/api/outage')
+def get_outage():
+    return jsonify(outage_schedule)
+
+@app.route('/api/outage/update', methods=['POST'])
+def update_outage():
+    data = request.get_json()
+    date_str = data.get('date')
+    start = data.get('start')
+    end = data.get('end')
+    if not date_str or not start or not end:
+        return 'invalid data', 400
+    outage_schedule[date_str] = {"start": start, "end": end}
+    save_outage()
+    return jsonify({'status': 'ok'})
+
+# File management
 @app.route('/api/files')
 def list_files():
     items = []
@@ -257,33 +237,14 @@ def delete_file():
         return 'deleted', 200
     return 'not found', 404
 
-# ---------- 8. Auto-start with Windows ----------
-def create_scheduled_task():
-    """Create a Scheduled Task to run server at logon (if not exists)."""
-    task_name = "PySmartHomeServer"
-    # Check if task already exists
-    check = subprocess.run(f'schtasks /query /tn "{task_name}"', capture_output=True, text=True, shell=True)
-    if check.returncode == 0:
-        print("[*] Scheduled task already exists.")
-        return
-    bat_path = os.path.join(os.getcwd(), "start_server.bat")
-    cmd = f'schtasks /create /tn "{task_name}" /tr "{bat_path}" /sc onlogon /rl highest /f'
-    subprocess.run(cmd, shell=True)
-    print("[+] Scheduled task created. Server will start automatically at login.")
-
-# ---------- 9. Startup sequence ----------
+# ---------- 7. Startup ----------
 if __name__ == '__main__':
-    print("[*] First run setup...")
-    check_or_create_repo()
-    create_scheduled_task()
-
-    # Start scheduler for polling and GitHub push
     scheduler = BackgroundScheduler()
     scheduler.add_job(poll_sensors, 'interval', seconds=10)
     scheduler.add_job(push_to_github, 'interval', minutes=5)
     scheduler.start()
 
-    poll_sensors()  # initial poll
-
+    poll_sensors()
     print("[*] Server running on http://0.0.0.0:5000")
     app.run(host='0.0.0.0', port=5000, debug=False)
+    
