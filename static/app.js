@@ -7,6 +7,8 @@ let currentBoard = 'esp32_1';
 let currentRange = 'daily';
 let currentDate = new Date().toISOString().slice(0,10);
 let chart;
+let outageTimer = null;
+let outageSchedule = {};
 
 // Initial setup
 document.documentElement.setAttribute('data-theme', theme);
@@ -75,13 +77,8 @@ async function fetchDataRange(board, range, date) {
   const resp = await fetch(`${API}/api/data?board=${board}&range=${range}&date=${date}`);
   return resp.json();
 }
-async function fetchOutage() {
-  const resp = await fetch(API+'/api/outage');
-  return resp.json();
-}
 
 async function updateDashboard() {
-  // Node status
   try {
     const status = await fetchNodeStatus();
     document.getElementById('status-hub').style.background = status.hub_online ? '#0f0' : '#f00';
@@ -223,20 +220,67 @@ function formatPersianDate(dateStr) {
   const j = gregorianToJalali(d.getFullYear(), d.getMonth()+1, d.getDate());
   return `${j.year}/${String(j.month).padStart(2,'0')}/${String(j.day).padStart(2,'0')}`;
 }
+function timeToSeconds(timeStr) { const [h,m]=timeStr.split(':').map(Number); return h*3600+m*60; }
+
+async function fetchOutageCountdown() {
+  try {
+    const resp = await fetch(API + '/api/outage/countdown');
+    const data = await resp.json();
+    updateCountdownUI(data);
+  } catch(e) { console.error(e); }
+}
+
+function updateCountdownUI(data) {
+  const msgEl = document.getElementById('countdown-message');
+  const barEl = document.getElementById('progress-bar');
+  const markerEl = document.getElementById('progress-marker');
+  const startEl = document.getElementById('time-start');
+  const endEl = document.getElementById('time-end');
+  if (data.status === 'no_data') {
+    msgEl.textContent = 'برنامهٔ امروز ثبت نشده';
+    barEl.style.width = '0%'; markerEl.style.left = '0%';
+    return;
+  }
+  const today = new Date().toISOString().slice(0,10);
+  const sched = outageSchedule[today];
+  if (sched) {
+    startEl.textContent = sched.start;
+    endEl.textContent = sched.end;
+  }
+  if (data.status === 'before') {
+    msgEl.textContent = data.message;
+    const nowSec = (new Date().getHours()*3600) + (new Date().getMinutes()*60) + new Date().getSeconds();
+    barEl.style.width = '0%';
+    markerEl.style.left = (nowSec / 864) + '%';
+  } else if (data.status === 'during') {
+    msgEl.textContent = data.message;
+    const startSec = timeToSeconds(sched.start);
+    const endSec = timeToSeconds(sched.end);
+    const nowSec = timeToSeconds(new Date().toTimeString().slice(0,8));
+    const progress = ((nowSec - startSec) / (endSec - startSec)) * 100;
+    barEl.style.width = progress + '%';
+    markerEl.style.left = progress + '%';
+  } else { // after
+    msgEl.textContent = data.message;
+    barEl.style.width = '100%';
+    markerEl.style.left = '100%';
+  }
+}
+
 async function loadOutageSchedule() {
   try {
-    const schedule = await fetchOutage();
+    const resp = await fetch(API + '/api/outage');
+    outageSchedule = await resp.json();
     const today = new Date().toISOString().slice(0,10);
     const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0,10);
     const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0,10);
-
     const updateDay = (date, prefix) => {
-      const elDate = document.getElementById(prefix+'-date');
-      const elTime = document.getElementById(prefix+'-time');
+      const elDate = document.getElementById(prefix + '-date');
+      const elTime = document.getElementById(prefix + '-time');
       if (elDate) elDate.textContent = formatPersianDate(date);
       if (elTime) {
-        if (schedule[date]) {
-          elTime.textContent = `${schedule[date].start} تا ${schedule[date].end}`;
+        if (outageSchedule[date]) {
+          elTime.textContent = `${outageSchedule[date].start} تا ${outageSchedule[date].end}`;
           elTime.style.color = 'var(--warning)';
         } else {
           elTime.textContent = 'نامشخص';
@@ -247,6 +291,10 @@ async function loadOutageSchedule() {
     updateDay(yesterday, 'yesterday');
     updateDay(today, 'today');
     updateDay(tomorrow, 'tomorrow');
+    // Start countdown
+    fetchOutageCountdown();
+    if (outageTimer) clearInterval(outageTimer);
+    outageTimer = setInterval(fetchOutageCountdown, 1000);
   } catch(e) { console.error(e); }
 }
 loadOutageSchedule();
@@ -270,7 +318,7 @@ document.getElementById('save-outage').addEventListener('click', async () => {
     body: JSON.stringify({ date, start, end })
   });
   document.getElementById('outage-modal').classList.add('hidden');
-  loadOutageSchedule();
+  loadOutageSchedule(); // Refresh everything
 });
 
 // ===================== THEME & LANGUAGE =====================
