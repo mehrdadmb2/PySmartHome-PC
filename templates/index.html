@@ -119,27 +119,42 @@
       </div>
     </div>
 
-    <!-- برنامه قطع برق -->
+    <!-- Power Outage Card -->
     <div class="glass power-outage-card" id="outage-card">
       <div class="card-header">
         <h2>⚡ برنامهٔ قطع برق</h2>
         <button id="edit-outage-btn" class="btn btn-small">✏️ ویرایش</button>
       </div>
+
+      <!-- Live countdown & progress bar -->
+      <div class="outage-live" id="outage-live">
+        <div class="countdown-message" id="countdown-message">در حال بررسی...</div>
+        <div class="progress-bar-container">
+          <div class="progress-bar" id="progress-bar"></div>
+          <div class="progress-marker" id="progress-marker">●</div>
+        </div>
+        <div class="time-labels">
+          <span class="time-start" id="time-start">09:00</span>
+          <span class="time-end" id="time-end">11:00</span>
+        </div>
+      </div>
+
+      <!-- Static schedule for yesterday, today, tomorrow -->
       <div class="outage-days">
         <div class="outage-day" id="outage-yesterday">
           <span class="day-label">دیروز</span>
           <span class="day-date" id="yesterday-date"></span>
-          <span class="day-time" id="yesterday-time">--:-- تا --:--</span>
+          <span class="day-time" id="yesterday-time">نامشخص</span>
         </div>
         <div class="outage-day today" id="outage-today">
           <span class="day-label">امروز</span>
           <span class="day-date" id="today-date"></span>
-          <span class="day-time" id="today-time">--:-- تا --:--</span>
+          <span class="day-time" id="today-time">نامشخص</span>
         </div>
         <div class="outage-day" id="outage-tomorrow">
           <span class="day-label">فردا</span>
           <span class="day-date" id="tomorrow-date"></span>
-          <span class="day-time" id="tomorrow-time">--:-- تا --:--</span>
+          <span class="day-time" id="tomorrow-time">نامشخص</span>
         </div>
       </div>
     </div>
