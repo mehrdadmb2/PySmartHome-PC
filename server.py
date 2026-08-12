@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """
-PySmartHome-PC – Smart Home Server with Power Outage Schedule
-Auto-installs dependencies, polls ESP32s, serves dashboard, pushes to GitHub.
+PySmartHome-PC – Smart Home Server (Final Stable)
 """
 
-import os, sys, subprocess, json, csv, time, datetime, base64, shutil
-from pathlib import Path
+import os, sys, subprocess, json, csv, time, datetime, base64
 
 # ---------- 1. Install dependencies ----------
 def install_requirements():
@@ -27,7 +25,7 @@ GITHUB_USER = "mehrdadmb2"
 GITHUB_REPO = "PySmartHome-PC"
 GITHUB_BRANCH = "main"
 
-# ---------- صحیح خواندن توکن ----------
+# ---------- خواندن صحیح توکن ----------
 GITHUB_TOKEN = ""
 with open("config.txt", "r") as f:
     content = f.read().strip()
@@ -35,7 +33,6 @@ if "token " in content:
     GITHUB_TOKEN = content.split("token ")[1]
 else:
     GITHUB_TOKEN = content
-# --------------------------------------
 
 ESP32_HUB_URL = "http://192.168.1.119/api/status"
 ESP32_S3_URL  = "http://192.168.1.115/api/status"
@@ -43,11 +40,25 @@ ESP32_S3_URL  = "http://192.168.1.115/api/status"
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# ---------- بارگذاری ایمن فایل قطع برق ----------
 OUTAGE_FILE = "outage_schedule.json"
 outage_schedule = {}
 if os.path.exists(OUTAGE_FILE):
-    with open(OUTAGE_FILE, "r", encoding="utf-8") as f:
-        outage_schedule = json.load(f)
+    try:
+        with open(OUTAGE_FILE, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+            if content:
+                outage_schedule = json.loads(content)
+            else:
+                outage_schedule = {}
+    except json.JSONDecodeError:
+        print("[!] outage_schedule.json corrupted, resetting.")
+        outage_schedule = {}
+        with open(OUTAGE_FILE, "w", encoding="utf-8") as f:
+            f.write("{}")
+else:
+    with open(OUTAGE_FILE, "w", encoding="utf-8") as f:
+        f.write("{}")
 
 def save_outage():
     with open(OUTAGE_FILE, "w", encoding="utf-8") as f:
@@ -58,7 +69,7 @@ sensors = {
     "esp32_1": {"temp": 0, "hum": 0, "last_seen": 0},
     "esp32_s3": {"temp": 0, "hum": 0, "last_seen": 0}
 }
-NODE_TIMEOUT = 600  # 10 minutes
+NODE_TIMEOUT = 600
 
 # ---------- 3. GitHub helpers ----------
 def upload_file_to_github(path, content):
@@ -85,14 +96,12 @@ def push_to_github():
                 content = f.read()
             upload_file_to_github(f"data/{fname}", content)
             time.sleep(1)
-    # Status
     status = {
         "esp32_1_online": (time.time() - sensors["esp32_1"]["last_seen"]) < NODE_TIMEOUT,
         "esp32_s3_online": (time.time() - sensors["esp32_s3"]["last_seen"]) < NODE_TIMEOUT,
         "last_push": datetime.datetime.now().isoformat()
     }
     upload_file_to_github("status.json", json.dumps(status))
-    # Outage schedule
     with open(OUTAGE_FILE, "r", encoding="utf-8") as f:
         upload_file_to_github(OUTAGE_FILE, f.read())
 
