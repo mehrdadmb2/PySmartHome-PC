@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-PySmartHome-PC – Smart Home Server (Final Stable)
+PySmartHome-PC – Smart Home Server (Final)
+Auto‑installs deps, polls ESP32s, serves dashboard, pushes to GitHub.
 """
 
 import os, sys, subprocess, json, csv, time, datetime, base64
@@ -25,7 +26,7 @@ GITHUB_USER = "mehrdadmb2"
 GITHUB_REPO = "PySmartHome-PC"
 GITHUB_BRANCH = "main"
 
-# ---------- خواندن صحیح توکن ----------
+# ---------- Read token safely ----------
 GITHUB_TOKEN = ""
 with open("config.txt", "r") as f:
     content = f.read().strip()
@@ -40,7 +41,7 @@ ESP32_S3_URL  = "http://192.168.1.115/api/status"
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# ---------- بارگذاری ایمن فایل قطع برق ----------
+# ---------- Outage schedule (safe load) ----------
 OUTAGE_FILE = "outage_schedule.json"
 outage_schedule = {}
 if os.path.exists(OUTAGE_FILE):
@@ -64,7 +65,7 @@ def save_outage():
     with open(OUTAGE_FILE, "w", encoding="utf-8") as f:
         json.dump(outage_schedule, f, indent=2)
 
-# Sensor state
+# ---------- Sensor state ----------
 sensors = {
     "esp32_1": {"temp": 0, "hum": 0, "last_seen": 0},
     "esp32_s3": {"temp": 0, "hum": 0, "last_seen": 0}
@@ -117,7 +118,7 @@ def log_to_csv(board, temp, hum):
         now = datetime.datetime.now().strftime("%H:%M:%S")
         writer.writerow([now, f"{temp:.1f}", f"{hum:.1f}"])
 
-# ---------- 5. Sensor polling ----------
+# ---------- 5. Polling ----------
 def poll_sensors():
     for name, url in [("esp32_1", ESP32_HUB_URL), ("esp32_s3", ESP32_S3_URL)]:
         try:
@@ -210,7 +211,33 @@ def update_outage():
     save_outage()
     return jsonify({'status': 'ok'})
 
-# File management
+@app.route('/api/outage/countdown')
+def outage_countdown():
+    today_str = datetime.date.today().isoformat()
+    if today_str not in outage_schedule:
+        return jsonify({"status": "no_data"})
+    sched = outage_schedule[today_str]
+    now = datetime.datetime.now()
+    start_today = datetime.datetime.strptime(today_str + " " + sched["start"], "%Y-%m-%d %H:%M")
+    end_today   = datetime.datetime.strptime(today_str + " " + sched["end"], "%Y-%m-%d %H:%M")
+    if now < start_today:
+        diff = start_today - now
+        return jsonify({
+            "status": "before",
+            "total_seconds": int(diff.total_seconds()),
+            "message": f"برق {diff.seconds//3600} ساعت و {(diff.seconds//60)%60} دقیقهٔ دیگر قطع می‌شود"
+        })
+    elif now < end_today:
+        diff = end_today - now
+        return jsonify({
+            "status": "during",
+            "total_seconds": int(diff.total_seconds()),
+            "message": f"برق {diff.seconds//3600} ساعت و {(diff.seconds//60)%60} دقیقهٔ دیگر وصل می‌شود"
+        })
+    else:
+        return jsonify({"status": "after", "message": "برق امروز وصل است"})
+
+# File management (unchanged)
 @app.route('/api/files')
 def list_files():
     items = []
@@ -256,6 +283,13 @@ def delete_file():
 
 # ---------- 7. Startup ----------
 if __name__ == '__main__':
+    # Set default schedule for today if not present
+    today_str = datetime.date.today().isoformat()
+    if today_str not in outage_schedule:
+        outage_schedule[today_str] = {"start": "09:00", "end": "11:00"}
+        save_outage()
+        print(f"[*] Default outage schedule set for today: 09:00 - 11:00")
+
     scheduler = BackgroundScheduler()
     scheduler.add_job(poll_sensors, 'interval', seconds=10)
     scheduler.add_job(push_to_github, 'interval', minutes=5)
