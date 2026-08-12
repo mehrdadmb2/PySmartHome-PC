@@ -12,7 +12,6 @@
 </head>
 <body>
   <canvas id="particle-canvas"></canvas>
-
   <header class="glass sticky-header">
     <div class="header-left"><h1 class="neon-text">SmartHome Monitor</h1></div>
     <div class="header-right">
@@ -68,10 +67,21 @@
     <!-- Power Outage Card (no edit button) -->
     <div class="glass power-outage-card">
       <h2>⚡ Power Outage Schedule</h2>
+      <div class="outage-live">
+        <div class="countdown-message" id="countdown-message">Loading...</div>
+        <div class="progress-bar-container">
+          <div class="progress-bar" id="progress-bar"></div>
+          <div class="progress-marker" id="progress-marker">●</div>
+        </div>
+        <div class="time-labels">
+          <span class="time-start" id="time-start">09:00</span>
+          <span class="time-end" id="time-end">11:00</span>
+        </div>
+      </div>
       <div class="outage-days">
-        <div class="outage-day"><span class="day-label">Yesterday</span><span class="day-date" id="yesterday-date"></span><span class="day-time" id="yesterday-time">--</span></div>
-        <div class="outage-day today"><span class="day-label">Today</span><span class="day-date" id="today-date"></span><span class="day-time" id="today-time">--</span></div>
-        <div class="outage-day"><span class="day-label">Tomorrow</span><span class="day-date" id="tomorrow-date"></span><span class="day-time" id="tomorrow-time">--</span></div>
+        <div class="outage-day"><span class="day-label">Yesterday</span><span class="day-date" id="yesterday-date"></span><span class="day-time" id="yesterday-time">Unknown</span></div>
+        <div class="outage-day today"><span class="day-label">Today</span><span class="day-date" id="today-date"></span><span class="day-time" id="today-time">Unknown</span></div>
+        <div class="outage-day"><span class="day-label">Tomorrow</span><span class="day-date" id="tomorrow-date"></span><span class="day-time" id="tomorrow-time">Unknown</span></div>
       </div>
     </div>
 
@@ -99,7 +109,6 @@
 
     <div class="glass chart-card"><canvas id="mainChart"></canvas></div>
 
-    <!-- Data Table Modal -->
     <div class="modal hidden" id="data-modal">
       <div class="modal-content glass">
         <span class="modal-close" id="close-modal">&times;</span>
