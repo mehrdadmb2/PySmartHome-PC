@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 PySmartHome-PC – Smart Home Server with Power Outage Schedule
+Auto-installs dependencies, polls ESP32s, serves dashboard, pushes to GitHub.
 """
 
 import os, sys, subprocess, json, csv, time, datetime, base64, shutil
@@ -25,9 +26,16 @@ import jdatetime
 GITHUB_USER = "mehrdadmb2"
 GITHUB_REPO = "PySmartHome-PC"
 GITHUB_BRANCH = "main"
+
+# ---------- صحیح خواندن توکن ----------
 GITHUB_TOKEN = ""
 with open("config.txt", "r") as f:
-    GITHUB_TOKEN = f.read().strip().split("token ")[1] if "token " in f.read() else f.read().strip()
+    content = f.read().strip()
+if "token " in content:
+    GITHUB_TOKEN = content.split("token ")[1]
+else:
+    GITHUB_TOKEN = content
+# --------------------------------------
 
 ESP32_HUB_URL = "http://192.168.1.119/api/status"
 ESP32_S3_URL  = "http://192.168.1.115/api/status"
@@ -247,4 +255,3 @@ if __name__ == '__main__':
     poll_sensors()
     print("[*] Server running on http://0.0.0.0:5000")
     app.run(host='0.0.0.0', port=5000, debug=False)
-    
