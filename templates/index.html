@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr" data-theme="dark">
+<html lang="fa" dir="rtl" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart Home Monitor | Internal Dashboard</title>
+  <title>داشبورد خانه هوشمند | داخلی</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -19,164 +19,209 @@
     </div>
     <div class="header-right">
       <span class="datetime" id="datetime">--</span>
-      <button id="theme-toggle" class="icon-btn" title="Dark/Light">🌓</button>
-      <button id="retro-toggle" class="icon-btn" title="Retro Mode">🕹️</button>
-      <button id="lang-toggle" class="icon-btn" title="Persian/English">فا</button>
-      <button id="fullscreen-btn" class="icon-btn" title="Fullscreen">⛶</button>
+      <button id="theme-toggle" class="icon-btn" title="تاریک/روشن">🌓</button>
+      <button id="retro-toggle" class="icon-btn" title="حالت رترو">🕹️</button>
+      <button id="lang-toggle" class="icon-btn" title="فارسی/English">En</button>
+      <button id="fullscreen-btn" class="icon-btn" title="تمام‌صفحه">⛶</button>
     </div>
   </header>
 
   <main class="container">
-    <!-- Node Status -->
+    <!-- نوار وضعیت نودها -->
     <div class="node-status-bar glass">
       <div class="node">
         <span class="node-icon">🖥️</span>
-        <span class="node-label">Hub (ESP32)</span>
+        <span class="node-label">هاب (ESP32)</span>
         <span class="status-dot" id="status-hub"></span>
-        <span class="node-last-seen" id="hub-last-seen">Online</span>
+        <span class="node-last-seen" id="hub-last-seen">آنلاین</span>
       </div>
       <div class="node">
         <span class="node-icon">🌡️</span>
-        <span class="node-label">Sensor S3</span>
+        <span class="node-label">سنسور S3</span>
         <span class="status-dot" id="status-s3"></span>
-        <span class="node-last-seen" id="s3-last-seen">Online</span>
+        <span class="node-last-seen" id="s3-last-seen">آنلاین</span>
       </div>
     </div>
 
-    <!-- System Stats -->
+    <!-- کارت‌های آمار کلی -->
     <div class="stats-grid">
       <div class="glass stat-card">
         <div class="stat-icon">⏱️</div>
         <div class="stat-content">
-          <h3>System Uptime</h3>
+          <h3>مدت روشن بودن سیستم</h3>
           <p id="sys-uptime">--</p>
         </div>
       </div>
       <div class="glass stat-card">
         <div class="stat-icon">📡</div>
         <div class="stat-content">
-          <h3>Last Push</h3>
+          <h3>آخرین ارسال</h3>
           <p id="last-push-time">--</p>
         </div>
       </div>
       <div class="glass stat-card">
         <div class="stat-icon">📊</div>
         <div class="stat-content">
-          <h3>Today's Records</h3>
+          <h3>تعداد ثبت امروز</h3>
           <p id="total-records">--</p>
         </div>
       </div>
     </div>
 
-    <!-- Room Cards -->
+    <!-- اتاق‌ها -->
     <div class="rooms-grid">
       <div class="glass room-card" id="room1-card">
         <div class="room-header">
-          <h3>Room 1 (Hub)</h3>
+          <h3>اتاق ۱ (هاب)</h3>
           <span class="alert-badge hidden" id="alert-room1">⚠️</span>
         </div>
         <div class="room-values">
           <div class="value-box">
-            <span class="value-label">Temperature</span>
+            <span class="value-label">دما</span>
             <span class="value-number" id="t1">--</span><span class="value-unit">°C</span>
           </div>
           <div class="value-box">
-            <span class="value-label">Humidity</span>
+            <span class="value-label">رطوبت</span>
             <span class="value-number" id="h1">--</span><span class="value-unit">%</span>
           </div>
         </div>
         <div class="room-stats">
-          <p>Avg: <span id="avg-t1">--</span>°C / <span id="avg-h1">--</span>%</p>
-          <p>Min/Max: <span id="minmax-t1">--</span>°C / <span id="minmax-h1">--</span>%</p>
-          <p>Samples: <span id="count1">--</span></p>
+          <p>میانگین: <span id="avg-t1">--</span>°C / <span id="avg-h1">--</span>%</p>
+          <p>کمینه/بیشینه: <span id="minmax-t1">--</span>°C / <span id="minmax-h1">--</span>%</p>
+          <p>تعداد نمونه: <span id="count1">--</span></p>
           <p class="trend" id="trend1"></p>
         </div>
-        <button class="btn btn-small export-btn" data-board="esp32_1">📥 Export CSV</button>
+        <button class="btn btn-small export-btn" data-board="esp32_1">📥 خروجی CSV</button>
       </div>
 
       <div class="glass room-card" id="room2-card">
         <div class="room-header">
-          <h3>Room 2 (S3)</h3>
+          <h3>اتاق ۲ (S3)</h3>
           <span class="alert-badge hidden" id="alert-room2">⚠️</span>
         </div>
         <div class="room-values">
           <div class="value-box">
-            <span class="value-label">Temperature</span>
+            <span class="value-label">دما</span>
             <span class="value-number" id="t2">--</span><span class="value-unit">°C</span>
           </div>
           <div class="value-box">
-            <span class="value-label">Humidity</span>
+            <span class="value-label">رطوبت</span>
             <span class="value-number" id="h2">--</span><span class="value-unit">%</span>
           </div>
         </div>
         <div class="room-stats">
-          <p>Avg: <span id="avg-t2">--</span>°C / <span id="avg-h2">--</span>%</p>
-          <p>Min/Max: <span id="minmax-t2">--</span>°C / <span id="minmax-h2">--</span>%</p>
-          <p>Samples: <span id="count2">--</span></p>
+          <p>میانگین: <span id="avg-t2">--</span>°C / <span id="avg-h2">--</span>%</p>
+          <p>کمینه/بیشینه: <span id="minmax-t2">--</span>°C / <span id="minmax-h2">--</span>%</p>
+          <p>تعداد نمونه: <span id="count2">--</span></p>
           <p class="trend" id="trend2"></p>
         </div>
-        <button class="btn btn-small export-btn" data-board="esp32_s3">📥 Export CSV</button>
+        <button class="btn btn-small export-btn" data-board="esp32_s3">📥 خروجی CSV</button>
       </div>
     </div>
 
-    <!-- Chart Controls -->
+    <!-- برنامه قطع برق -->
+    <div class="glass power-outage-card" id="outage-card">
+      <div class="card-header">
+        <h2>⚡ برنامهٔ قطع برق</h2>
+        <button id="edit-outage-btn" class="btn btn-small">✏️ ویرایش</button>
+      </div>
+      <div class="outage-days">
+        <div class="outage-day" id="outage-yesterday">
+          <span class="day-label">دیروز</span>
+          <span class="day-date" id="yesterday-date"></span>
+          <span class="day-time" id="yesterday-time">--:-- تا --:--</span>
+        </div>
+        <div class="outage-day today" id="outage-today">
+          <span class="day-label">امروز</span>
+          <span class="day-date" id="today-date"></span>
+          <span class="day-time" id="today-time">--:-- تا --:--</span>
+        </div>
+        <div class="outage-day" id="outage-tomorrow">
+          <span class="day-label">فردا</span>
+          <span class="day-date" id="tomorrow-date"></span>
+          <span class="day-time" id="tomorrow-time">--:-- تا --:--</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- کنترل نمودار -->
     <div class="chart-controls glass">
       <div class="control-group">
-        <label for="board-select">Sensor:</label>
+        <label for="board-select">سنسور:</label>
         <select id="board-select">
-          <option value="esp32_1">Room 1</option>
-          <option value="esp32_s3">Room 2</option>
-          <option value="combined">Combined</option>
+          <option value="esp32_1">اتاق ۱</option>
+          <option value="esp32_s3">اتاق ۲</option>
+          <option value="combined">ترکیبی</option>
         </select>
       </div>
       <div class="control-group">
-        <label>Range:</label>
-        <button class="btn btn-small range-btn" data-range="daily">Today</button>
-        <button class="btn btn-small range-btn" data-range="yesterday">Yesterday</button>
-        <button class="btn btn-small range-btn" data-range="weekly">Week</button>
-        <button class="btn btn-small range-btn" data-range="monthly">Month</button>
+        <label>بازه:</label>
+        <button class="btn btn-small range-btn" data-range="daily">امروز</button>
+        <button class="btn btn-small range-btn" data-range="yesterday">دیروز</button>
+        <button class="btn btn-small range-btn" data-range="weekly">هفته</button>
+        <button class="btn btn-small range-btn" data-range="monthly">ماه</button>
         <input type="date" class="date-picker" id="chart-date">
       </div>
       <div class="control-group">
-        <button class="btn btn-small" id="view-table-btn">📋 View Data Table</button>
+        <button class="btn btn-small" id="view-table-btn">📋 مشاهده جدول</button>
       </div>
     </div>
 
-    <!-- Chart -->
+    <!-- نمودار -->
     <div class="glass chart-card">
-      <div class="loading-skeleton hidden" id="chart-skeleton"></div>
       <canvas id="mainChart"></canvas>
     </div>
 
-    <!-- File Manager (only on internal dashboard) -->
+    <!-- مدیریت فایل -->
     <div class="glass file-manager">
-      <h2>📁 File Manager</h2>
+      <h2>📁 مدیریت فایل‌ها</h2>
       <div class="file-toolbar">
-        <button id="refresh-files" class="btn btn-small">🔄 Refresh</button>
-        <button id="download-all" class="btn btn-small">⬇️ Download All</button>
-        <label for="upload-input" class="btn btn-small">📤 Upload</label>
+        <button id="refresh-files" class="btn btn-small">🔄 تازه‌سازی</button>
+        <button id="download-all" class="btn btn-small">⬇️ دانلود همه</button>
+        <label for="upload-input" class="btn btn-small">📤 آپلود</label>
         <input type="file" id="upload-input" multiple style="display:none">
-        <input type="text" id="upload-dir" placeholder="Folder (e.g., /www/)" value="/www/" class="glass-input">
+        <input type="text" id="upload-dir" placeholder="پوشه (مثلاً /www/)" value="/www/" class="glass-input">
       </div>
       <div id="upload-status" class="upload-status"></div>
       <table id="file-table">
-        <thead><tr><th>File Name</th><th>Size (KB)</th><th>Actions</th></tr></thead>
+        <thead><tr><th>نام فایل</th><th>حجم (KB)</th><th>عملیات</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
 
-    <!-- Data Table Modal -->
+    <!-- مودال جدول داده -->
     <div class="modal hidden" id="data-modal">
       <div class="modal-content glass">
         <span class="modal-close" id="close-modal">&times;</span>
-        <h2>Raw Data</h2>
+        <h2>داده‌های خام</h2>
         <div class="table-container">
           <table id="data-table">
-            <thead><tr><th>Time</th><th>Temperature</th><th>Humidity</th></tr></thead>
+            <thead><tr><th>زمان</th><th>دما</th><th>رطوبت</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
-        <button class="btn" id="export-modal-csv">📥 Download as CSV</button>
+        <button class="btn" id="export-modal-csv">📥 دانلود CSV</button>
+      </div>
+    </div>
+
+    <!-- مودال ویرایش قطع برق -->
+    <div class="modal hidden" id="outage-modal">
+      <div class="modal-content glass">
+        <span class="modal-close" id="close-outage-modal">&times;</span>
+        <h2>ویرایش برنامه قطع برق</h2>
+        <div class="form-group">
+          <label>تاریخ:</label>
+          <input type="date" id="outage-date" />
+        </div>
+        <div class="form-group">
+          <label>شروع (ساعت:دقیقه):</label>
+          <input type="time" id="outage-start" />
+        </div>
+        <div class="form-group">
+          <label>پایان (ساعت:دقیقه):</label>
+          <input type="time" id="outage-end" />
+        </div>
+        <button id="save-outage" class="btn">💾 ذخیره</button>
       </div>
     </div>
   </main>
