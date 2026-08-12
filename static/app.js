@@ -1,50 +1,42 @@
 const API = window.location.origin;
 const TEMP_THRESHOLD = 35;
 
-let lang = localStorage.getItem('lang') || 'en';
+let lang = localStorage.getItem('lang') || 'fa';
 let theme = localStorage.getItem('theme') || 'dark';
 let currentBoard = 'esp32_1';
 let currentRange = 'daily';
 let currentDate = new Date().toISOString().slice(0,10);
 let chart;
 
-// ===================== INITIAL SETUP =====================
+// Initial setup
 document.documentElement.setAttribute('data-theme', theme);
 document.documentElement.lang = lang;
 document.dir = lang === 'fa' ? 'rtl' : 'ltr';
+updateDateTime(); setInterval(updateDateTime, 1000);
 
-// ===================== PARTICLE BACKGROUND =====================
+// ===================== BACKGROUND =====================
 function initParticles() {
   const canvas = document.getElementById('particle-canvas');
   const ctx = canvas.getContext('2d');
-  let width, height;
-  let particles = [];
-  const maxDist = 100;
-
-  function resize() {
-    width = canvas.width = window.innerWidth;
-    height = canvas.height = window.innerHeight;
-  }
-  window.addEventListener('resize', resize);
-  resize();
-
+  let width, height, particles = [];
+  function resize() { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; }
+  window.addEventListener('resize', resize); resize();
   class Particle {
     constructor() { this.x = Math.random()*width; this.y = Math.random()*height; this.vx = (Math.random()-0.5)*0.5; this.vy = (Math.random()-0.5)*0.5; }
     update() { this.x += this.vx; this.y += this.vy; if(this.x<0||this.x>width) this.vx*=-1; if(this.y<0||this.y>height) this.vy*=-1; }
     draw() { ctx.beginPath(); ctx.arc(this.x,this.y,1.5,0,Math.PI*2); ctx.fillStyle = 'rgba(0,255,255,0.5)'; ctx.fill(); }
   }
   for(let i=0;i<80;i++) particles.push(new Particle());
-
   function animate() {
     ctx.clearRect(0,0,width,height);
+    particles.forEach(p => { p.update(); p.draw(); });
     for(let i=0;i<particles.length;i++) {
-      particles[i].update(); particles[i].draw();
       for(let j=i+1;j<particles.length;j++) {
         const dx = particles[i].x - particles[j].x, dy = particles[i].y - particles[j].y;
         const dist = Math.sqrt(dx*dx+dy*dy);
-        if(dist < maxDist) {
+        if(dist < 100) {
           ctx.beginPath(); ctx.moveTo(particles[i].x, particles[i].y); ctx.lineTo(particles[j].x, particles[j].y);
-          ctx.strokeStyle = `rgba(0,255,255,${1 - dist/maxDist})`; ctx.stroke();
+          ctx.strokeStyle = `rgba(0,255,255,${1 - dist/100})`; ctx.stroke();
         }
       }
     }
@@ -55,14 +47,22 @@ function initParticles() {
 initParticles();
 
 // ===================== DATE & TIME =====================
+function gregorianToJalali(gy, gm, gd) {
+  const gy2 = (gm > 2) ? (gy + 1) : gy;
+  let days = 355666 + (365 * gy) + Math.floor((gy2 + 3) / 4) - Math.floor((gy2 + 99) / 100) + Math.floor((gy2 + 399) / 400) + gd + Math.floor((153 * (gm > 2 ? (gm - 3) : (gm + 9)) + 2) / 5);
+  let jy = -1595 + (33 * Math.floor(days / 12053));
+  days %= 12053; jy += 4 * Math.floor(days / 1461); days %= 1461;
+  if (days > 365) { jy += Math.floor((days - 1) / 365); days = (days - 1) % 365; }
+  const jm = (days < 186) ? 1 + Math.floor(days / 31) : 7 + Math.floor((days - 186) / 30);
+  const jd = 1 + ((days < 186) ? (days % 31) : ((days - 186) % 30));
+  return { year: jy, month: jm, day: jd };
+}
 function updateDateTime() {
   const now = new Date();
-  document.getElementById('datetime').textContent = now.toLocaleTimeString(lang==='fa'?'fa-IR':'en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  document.getElementById('datetime').textContent = now.toLocaleTimeString('fa-IR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 }
-setInterval(updateDateTime, 1000);
-updateDateTime();
 
-// ===================== API HELPERS =====================
+// ===================== DASHBOARD DATA =====================
 async function fetchCurrent() {
   const resp = await fetch(API+'/api/current');
   return resp.json();
@@ -75,23 +75,21 @@ async function fetchDataRange(board, range, date) {
   const resp = await fetch(`${API}/api/data?board=${board}&range=${range}&date=${date}`);
   return resp.json();
 }
-async function fetchFiles() {
-  const resp = await fetch(API+'/api/files');
+async function fetchOutage() {
+  const resp = await fetch(API+'/api/outage');
   return resp.json();
 }
 
-// ===================== DASHBOARD UPDATE =====================
 async function updateDashboard() {
   // Node status
   try {
     const status = await fetchNodeStatus();
     document.getElementById('status-hub').style.background = status.hub_online ? '#0f0' : '#f00';
     document.getElementById('status-s3').style.background = status.s3_online ? '#0f0' : '#f00';
-    document.getElementById('hub-last-seen').textContent = status.hub_online ? 'Online' : 'Offline';
-    document.getElementById('s3-last-seen').textContent = status.s3_online ? 'Online' : 'Offline';
+    document.getElementById('hub-last-seen').textContent = status.hub_online ? 'آنلاین' : 'آفلاین';
+    document.getElementById('s3-last-seen').textContent = status.s3_online ? 'آنلاین' : 'آفلاین';
   } catch(e) {}
 
-  // Current values & room stats
   const today = new Date().toISOString().slice(0,10);
   for (let i=1; i<=2; i++) {
     const board = i===1 ? 'esp32_1' : 'esp32_s3';
@@ -107,26 +105,20 @@ async function updateDashboard() {
       document.getElementById('minmax-t'+i).textContent = `${Math.min(...temps).toFixed(1)} / ${Math.max(...temps).toFixed(1)}`;
       document.getElementById('minmax-h'+i).textContent = `${Math.min(...hums).toFixed(0)} / ${Math.max(...hums).toFixed(0)}`;
       document.getElementById('count'+i).textContent = data.length;
-      // Trend vs yesterday
+
       const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
       const yesterdayData = await fetchDataRange(board, 'daily', yesterday);
       if (yesterdayData.length) {
         const yesterdayAvg = yesterdayData.map(d=>d.temp).reduce((a,b)=>a+b,0)/yesterdayData.length;
         const todayAvg = temps.reduce((a,b)=>a+b,0)/temps.length;
         const trend = todayAvg - yesterdayAvg;
-        document.getElementById('trend'+i).innerHTML = trend > 0.5 ? `📈 +${trend.toFixed(1)}°C` : (trend < -0.5 ? `📉 ${trend.toFixed(1)}°C` : '➡️ Stable');
+        document.getElementById('trend'+i).innerHTML = trend > 0.5 ? `📈 +${trend.toFixed(1)}°C` : (trend < -0.5 ? `📉 ${trend.toFixed(1)}°C` : '➡️ ثابت');
       }
-      // Alert
-      if (Math.max(...temps) > TEMP_THRESHOLD) {
-        document.getElementById('alert-room'+i).classList.remove('hidden');
-      } else {
-        document.getElementById('alert-room'+i).classList.add('hidden');
-      }
-      document.getElementById('total-records').textContent = data.length;
+      if (Math.max(...temps) > TEMP_THRESHOLD) document.getElementById('alert-room'+i).classList.remove('hidden');
+      else document.getElementById('alert-room'+i).classList.add('hidden');
     }
   }
-
-  // System uptime (based on first record of hub)
+  // Uptime
   try {
     const hubData = await fetchDataRange('esp32_1', 'daily', today);
     if (hubData.length) {
@@ -138,29 +130,16 @@ async function updateDashboard() {
       document.getElementById('sys-uptime').textContent = `${hrs}h ${mins}m`;
     }
   } catch(e) {}
-
-  // Last push time (stored in status.json but not directly available; we'll use current time as placeholder)
-  // Actually we can get from /api/datetime
-  try {
-    const dtResp = await fetch(API+'/api/datetime');
-    const dt = await dtResp.json();
-    document.getElementById('last-push-time').textContent = new Date(dt.gregorian).toLocaleTimeString();
-  } catch(e) {}
+  document.getElementById('total-records').textContent = (await fetchDataRange('esp32_1','daily',today)).length;
 }
-updateDashboard();
 setInterval(updateDashboard, 60000);
+updateDashboard();
 
 // ===================== CHART =====================
 async function drawChart() {
-  const board = currentBoard;
-  const range = currentRange;
-  const date = currentDate;
-
+  const board = currentBoard; const range = currentRange; const date = currentDate;
   if (board === 'combined') {
-    const [data1, data2] = await Promise.all([
-      fetchDataRange('esp32_1', range, date),
-      fetchDataRange('esp32_s3', range, date)
-    ]);
+    const [data1, data2] = await Promise.all([fetchDataRange('esp32_1',range,date), fetchDataRange('esp32_s3',range,date)]);
     const labels = data1.map(d => d.time);
     if (chart) chart.destroy();
     const ctx = document.getElementById('mainChart').getContext('2d');
@@ -169,19 +148,18 @@ async function drawChart() {
       data: {
         labels,
         datasets: [
-          { label: 'Room 1 Temp', data: data1.map(d=>d.temp), borderColor: '#ff6ec7', yAxisID: 'y', pointRadius: 0 },
-          { label: 'Room 2 Temp', data: data2.map(d=>d.temp), borderColor: '#ff9900', yAxisID: 'y', pointRadius: 0 },
-          { label: 'Room 1 Hum', data: data1.map(d=>d.humidity), borderColor: '#0ff', yAxisID: 'y1', pointRadius: 0 },
-          { label: 'Room 2 Hum', data: data2.map(d=>d.humidity), borderColor: '#00ff99', yAxisID: 'y1', pointRadius: 0 }
+          { label: 'دمای اتاق ۱', data: data1.map(d=>d.temp), borderColor: '#ff6ec7', yAxisID: 'y', pointRadius: 0 },
+          { label: 'دمای اتاق ۲', data: data2.map(d=>d.temp), borderColor: '#ff9900', yAxisID: 'y', pointRadius: 0 },
+          { label: 'رطوبت اتاق ۱', data: data1.map(d=>d.humidity), borderColor: '#0ff', yAxisID: 'y1', pointRadius: 0 },
+          { label: 'رطوبت اتاق ۲', data: data2.map(d=>d.humidity), borderColor: '#00ff99', yAxisID: 'y1', pointRadius: 0 }
         ]
       },
       options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } } },
+        responsive: true, maintainAspectRatio: false,
+        plugins: { zoom: { zoom: { wheel: { enabled:true }, pinch: { enabled:true }, mode:'x' }, pan:{ enabled:true, mode:'x' } } },
         scales: {
-          y: { type:'linear', position:'left', title:{display:true, text:'Temperature'} },
-          y1: { type:'linear', position:'right', title:{display:true, text:'Humidity'}, grid:{drawOnChartArea:false} }
+          y: { type:'linear', position:'left', title:{display:true, text:'دما'} },
+          y1: { type:'linear', position:'right', title:{display:true, text:'رطوبت'}, grid:{drawOnChartArea:false} }
         }
       }
     });
@@ -195,119 +173,107 @@ async function drawChart() {
       data: {
         labels,
         datasets: [
-          { label: 'Temperature (°C)', data: data.map(d=>d.temp), borderColor: '#ff6ec7', yAxisID: 'y', fill: true, backgroundColor: 'rgba(255,110,199,0.1)', pointRadius: 0 },
-          { label: 'Humidity (%)', data: data.map(d=>d.humidity), borderColor: '#0ff', yAxisID: 'y1', fill: true, backgroundColor: 'rgba(0,255,255,0.1)', pointRadius: 0 }
+          { label: 'دما (°C)', data: data.map(d=>d.temp), borderColor: '#ff6ec7', yAxisID: 'y', fill: true, backgroundColor: 'rgba(255,110,199,0.1)', pointRadius: 0 },
+          { label: 'رطوبت (%)', data: data.map(d=>d.humidity), borderColor: '#0ff', yAxisID: 'y1', fill: true, backgroundColor: 'rgba(0,255,255,0.1)', pointRadius: 0 }
         ]
       },
       options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } } },
+        responsive: true, maintainAspectRatio: false,
+        plugins: { zoom: { zoom: { wheel: { enabled:true }, pinch: { enabled:true }, mode:'x' }, pan:{ enabled:true, mode:'x' } } },
         scales: {
-          y: { type:'linear', position:'left', title:{display:true, text:'Temperature'} },
-          y1: { type:'linear', position:'right', title:{display:true, text:'Humidity'}, grid:{drawOnChartArea:false} }
+          y: { type:'linear', position:'left', title:{display:true, text:'دما'} },
+          y1: { type:'linear', position:'right', title:{display:true, text:'رطوبت'}, grid:{drawOnChartArea:false} }
         }
       }
     });
   }
 }
-
-// Initial draw
 drawChart();
 
-// ===================== EVENT LISTENERS =====================
-document.querySelectorAll('.range-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    currentRange = btn.dataset.range;
-    drawChart();
-  });
-});
-document.getElementById('board-select').addEventListener('change', (e) => {
-  currentBoard = e.target.value;
-  drawChart();
-});
-document.getElementById('chart-date').addEventListener('change', (e) => {
-  currentDate = e.target.value;
-  drawChart();
-});
+// Chart controls
+document.querySelectorAll('.range-btn').forEach(btn => btn.addEventListener('click', () => { currentRange = btn.dataset.range; drawChart(); }));
+document.getElementById('board-select').addEventListener('change', (e) => { currentBoard = e.target.value; drawChart(); });
+document.getElementById('chart-date').addEventListener('change', (e) => { currentDate = e.target.value; drawChart(); });
 
-// Export CSV
-document.querySelectorAll('.export-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const board = btn.dataset.board;
-    window.open(`${API}/api/data?board=${board}&range=daily&date=${new Date().toISOString().slice(0,10)}&format=csv`, '_blank');
-  });
-});
-
-// Modal
-document.getElementById('view-table-btn').addEventListener('click', async () => {
-  document.getElementById('data-modal').classList.remove('hidden');
-  const data = await fetchDataRange(currentBoard, currentRange, currentDate);
-  const tbody = document.querySelector('#data-table tbody');
-  tbody.innerHTML = data.map(d => `<tr><td>${d.time}</td><td>${d.temp.toFixed(1)}</td><td>${d.humidity.toFixed(0)}</td></tr>`).join('');
-});
-document.getElementById('close-modal').addEventListener('click', () => {
-  document.getElementById('data-modal').classList.add('hidden');
-});
-document.getElementById('export-modal-csv').addEventListener('click', () => {
-  const rows = [['Time','Temperature','Humidity']];
-  document.querySelectorAll('#data-table tbody tr').forEach(row => {
-    const cells = row.querySelectorAll('td');
-    rows.push([cells[0].textContent, cells[1].textContent, cells[2].textContent]);
-  });
-  const csvContent = rows.map(r => r.join(',')).join('\n');
-  const blob = new Blob([csvContent], {type:'text/csv'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href=url; a.download='data.csv'; a.click();
-});
-
-// File Manager
+// ===================== FILE MANAGER =====================
 async function loadFiles() {
-  const files = await fetchFiles();
+  const files = await (await fetch(API+'/api/files')).json();
   const tbody = document.querySelector('#file-table tbody');
-  tbody.innerHTML = files.map(f => `
-    <tr>
-      <td>${f.name}</td>
-      <td>${(f.size/1024).toFixed(1)}</td>
-      <td>
-        <button onclick="window.open('${API}/api/download?path=${encodeURIComponent(f.path)}')">⬇️</button>
-        <button onclick="deleteFile('${f.path}')">🗑️</button>
-      </td>
-    </tr>
-  `).join('');
+  tbody.innerHTML = files.map(f => `<tr><td>${f.name}</td><td>${(f.size/1024).toFixed(1)}</td><td><button onclick="window.open('${API}/api/download?path=${encodeURIComponent(f.path)}')">⬇️</button><button onclick="deleteFile('${f.path}')">🗑️</button></td></tr>`).join('');
 }
-async function deleteFile(path) {
-  if (confirm('Delete ' + path + '?')) {
-    await fetch(`${API}/api/delete?path=${encodeURIComponent(path)}`);
-    loadFiles();
-  }
-}
+async function deleteFile(path) { if(confirm('حذف شود؟')) { await fetch(`${API}/api/delete?path=${encodeURIComponent(path)}`); loadFiles(); } }
 document.getElementById('refresh-files').onclick = loadFiles;
 document.getElementById('download-all').onclick = async () => {
-  const files = await fetchFiles();
-  files.forEach((f, i) => {
-    setTimeout(() => {
-      const a = document.createElement('a');
-      a.href = API+'/api/download?path=' + encodeURIComponent(f.path);
-      a.download = f.name;
-      a.click();
-    }, i * 300);
-  });
+  const files = await (await fetch(API+'/api/files')).json();
+  files.forEach((f,i) => setTimeout(() => { const a=document.createElement('a'); a.href=API+'/api/download?path='+encodeURIComponent(f.path); a.download=f.name; a.click(); }, i*300));
 };
 document.getElementById('upload-input').onchange = async (e) => {
   const dir = document.getElementById('upload-dir').value || '/www/';
-  for (const file of e.target.files) {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('dir', dir);
-    await fetch(API+'/api/upload', { method:'POST', body: formData });
+  for(const file of e.target.files) {
+    const fd = new FormData(); fd.append('file', file); fd.append('dir', dir);
+    await fetch(API+'/api/upload', {method:'POST', body:fd});
   }
-  document.getElementById('upload-status').textContent = 'Upload complete.';
-  loadFiles();
+  document.getElementById('upload-status').textContent = 'آپلود کامل شد.'; loadFiles();
 };
 loadFiles();
 
-// ===================== THEME & LANG =====================
+// ===================== POWER OUTAGE =====================
+function formatPersianDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const j = gregorianToJalali(d.getFullYear(), d.getMonth()+1, d.getDate());
+  return `${j.year}/${String(j.month).padStart(2,'0')}/${String(j.day).padStart(2,'0')}`;
+}
+async function loadOutageSchedule() {
+  try {
+    const schedule = await fetchOutage();
+    const today = new Date().toISOString().slice(0,10);
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0,10);
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0,10);
+
+    const updateDay = (date, prefix) => {
+      const elDate = document.getElementById(prefix+'-date');
+      const elTime = document.getElementById(prefix+'-time');
+      if (elDate) elDate.textContent = formatPersianDate(date);
+      if (elTime) {
+        if (schedule[date]) {
+          elTime.textContent = `${schedule[date].start} تا ${schedule[date].end}`;
+          elTime.style.color = 'var(--warning)';
+        } else {
+          elTime.textContent = 'نامشخص';
+          elTime.style.color = 'var(--text)';
+        }
+      }
+    };
+    updateDay(yesterday, 'yesterday');
+    updateDay(today, 'today');
+    updateDay(tomorrow, 'tomorrow');
+  } catch(e) { console.error(e); }
+}
+loadOutageSchedule();
+
+// Edit outage modal
+document.getElementById('edit-outage-btn').addEventListener('click', () => {
+  document.getElementById('outage-modal').classList.remove('hidden');
+  document.getElementById('outage-date').value = new Date().toISOString().slice(0,10);
+});
+document.getElementById('close-outage-modal').addEventListener('click', () => {
+  document.getElementById('outage-modal').classList.add('hidden');
+});
+document.getElementById('save-outage').addEventListener('click', async () => {
+  const date = document.getElementById('outage-date').value;
+  const start = document.getElementById('outage-start').value;
+  const end = document.getElementById('outage-end').value;
+  if (!date || !start || !end) { alert('لطفاً همه فیلدها را پر کنید'); return; }
+  await fetch(API+'/api/outage/update', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ date, start, end })
+  });
+  document.getElementById('outage-modal').classList.add('hidden');
+  loadOutageSchedule();
+});
+
+// ===================== THEME & LANGUAGE =====================
 document.getElementById('theme-toggle').onclick = () => {
   theme = theme === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', theme);
@@ -319,7 +285,7 @@ document.getElementById('retro-toggle').onclick = () => {
   localStorage.setItem('theme', 'retro');
 };
 document.getElementById('lang-toggle').onclick = () => {
-  lang = lang === 'en' ? 'fa' : 'en';
+  lang = lang === 'fa' ? 'en' : 'fa';
   document.documentElement.lang = lang;
   document.dir = lang === 'fa' ? 'rtl' : 'ltr';
   localStorage.setItem('lang', lang);
@@ -329,3 +295,21 @@ document.getElementById('fullscreen-btn').onclick = () => {
   if (!document.fullscreenElement) document.documentElement.requestFullscreen();
   else document.exitFullscreen();
 };
+
+// ===================== DATA TABLE MODAL =====================
+document.getElementById('view-table-btn').addEventListener('click', async () => {
+  document.getElementById('data-modal').classList.remove('hidden');
+  const data = await fetchDataRange(currentBoard, currentRange, currentDate);
+  document.querySelector('#data-table tbody').innerHTML = data.map(d => `<tr><td>${d.time}</td><td>${d.temp.toFixed(1)}</td><td>${d.humidity.toFixed(0)}</td></tr>`).join('');
+});
+document.getElementById('close-modal').addEventListener('click', () => document.getElementById('data-modal').classList.add('hidden'));
+document.getElementById('export-modal-csv').addEventListener('click', () => {
+  const rows = [['زمان','دما','رطوبت']];
+  document.querySelectorAll('#data-table tbody tr').forEach(row => {
+    const cells = row.querySelectorAll('td');
+    rows.push([cells[0].textContent, cells[1].textContent, cells[2].textContent]);
+  });
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.csv'; a.click();
+});
