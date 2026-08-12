@@ -151,3 +151,46 @@ th { background: rgba(0,0,0,0.3); }
 }
 /* ===== UTILS ===== */
 .hidden { display: none !important; }
+/* Outage live section */
+.outage-live {
+  margin-bottom: 1.5rem;
+}
+.countdown-message {
+  font-size: 1.2rem;
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 0.8rem;
+  color: var(--warning);
+}
+.progress-bar-container {
+  position: relative;
+  height: 20px;
+  background: rgba(0,0,0,0.3);
+  border-radius: 10px;
+  margin-bottom: 0.5rem;
+  overflow: visible;
+}
+.progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-purple));
+  border-radius: 10px;
+  transition: width 0.3s linear;
+}
+.progress-marker {
+  position: absolute;
+  top: -8px;
+  left: 0%;
+  font-size: 1.5rem;
+  color: var(--neon-pink);
+  transform: translateX(-50%);
+  transition: left 0.3s linear;
+  filter: drop-shadow(0 0 5px var(--neon-pink));
+}
+.time-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+/* ... (rest) ... */
