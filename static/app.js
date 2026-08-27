@@ -1,5 +1,6 @@
 const API = window.location.origin;
 const TEMP_THRESHOLD = 35;
+const MODE = 'internal'; // یا 'online' برای نسخه آنلاین
 
 let lang = localStorage.getItem('lang') || 'en';
 let theme = localStorage.getItem('theme') || 'cyberpunk';
@@ -15,7 +16,7 @@ document.documentElement.lang = lang;
 document.dir = lang === 'fa' ? 'rtl' : 'ltr';
 updateDateTime(); setInterval(updateDateTime, 1000);
 
-// ===================== Background Particles =====================
+// ========== Particles ==========
 function initParticles() {
   const canvas = document.getElementById('particle-canvas');
   const ctx = canvas.getContext('2d');
@@ -23,11 +24,11 @@ function initParticles() {
   function resize() { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; }
   window.addEventListener('resize', resize); resize();
   class Particle {
-    constructor() { this.x = Math.random()*width; this.y = Math.random()*height; this.vx = (Math.random()-0.5)*0.5; this.vy = (Math.random()-0.5)*0.5; }
+    constructor() { this.x = Math.random()*width; this.y = Math.random()*height; this.vx = (Math.random()-0.5)*0.5; this.vy = (Math.random()-0.5)*0.5; this.size = Math.random()*2+1; }
     update() { this.x += this.vx; this.y += this.vy; if(this.x<0||this.x>width) this.vx*=-1; if(this.y<0||this.y>height) this.vy*=-1; }
-    draw() { ctx.beginPath(); ctx.arc(this.x,this.y,1.5,0,Math.PI*2); ctx.fillStyle = 'rgba(0,255,255,0.5)'; ctx.fill(); }
+    draw() { ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.fillStyle = 'rgba(0,255,255,0.4)'; ctx.fill(); }
   }
-  for(let i=0;i<80;i++) particles.push(new Particle());
+  for(let i=0;i<100;i++) particles.push(new Particle());
   function animate() {
     ctx.clearRect(0,0,width,height);
     particles.forEach(p => { p.update(); p.draw(); });
@@ -35,9 +36,9 @@ function initParticles() {
       for(let j=i+1;j<particles.length;j++) {
         const dx = particles[i].x - particles[j].x, dy = particles[i].y - particles[j].y;
         const dist = Math.sqrt(dx*dx+dy*dy);
-        if(dist < 100) {
+        if(dist < 120) {
           ctx.beginPath(); ctx.moveTo(particles[i].x, particles[i].y); ctx.lineTo(particles[j].x, particles[j].y);
-          ctx.strokeStyle = `rgba(0,255,255,${1 - dist/100})`; ctx.stroke();
+          ctx.strokeStyle = `rgba(0,255,255,${0.3*(1 - dist/120)})`; ctx.stroke();
         }
       }
     }
@@ -47,7 +48,7 @@ function initParticles() {
 }
 initParticles();
 
-// ===================== Helpers =====================
+// ========== Helpers ==========
 function gregorianToJalali(gy, gm, gd) {
   const gy2 = (gm > 2) ? (gy + 1) : gy;
   let days = 355666 + (365 * gy) + Math.floor((gy2 + 3) / 4) - Math.floor((gy2 + 99) / 100) + Math.floor((gy2 + 399) / 400) + gd + Math.floor((153 * (gm > 2 ? (gm - 3) : (gm + 9)) + 2) / 5);
@@ -64,18 +65,26 @@ function formatPersianDate(dateStr) {
   return `${j.year}/${String(j.month).padStart(2,'0')}/${String(j.day).padStart(2,'0')}`;
 }
 function timeToSeconds(timeStr) { const [h,m]=timeStr.split(':').map(Number); return h*3600+m*60; }
+function formatTime(seconds) {
+  const h = Math.floor(seconds/3600);
+  const m = Math.floor((seconds%3600)/60);
+  const s = seconds%60;
+  return `${h}h ${m}m ${s}s`;
+}
 
 function updateDateTime() {
   const now = new Date();
   document.getElementById('datetime').textContent = now.toLocaleTimeString(lang==='fa'?'fa-IR':'en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 }
 
-// ===================== Data Fetching =====================
+// ========== API Calls ==========
 async function fetchCurrent() { const r = await fetch(API+'/api/current'); return r.json(); }
 async function fetchNodeStatus() { const r = await fetch(API+'/api/nodestatus'); return r.json(); }
 async function fetchDataRange(board, range, date) { const r = await fetch(`${API}/api/data?board=${board}&range=${range}&date=${date}`); return r.json(); }
+async function fetchOutageSchedule() { const r = await fetch(API+'/api/outage'); return r.json(); }
+async function fetchOutageCountdown() { const r = await fetch(API+'/api/outage/countdown'); return r.json(); }
 
-// ===================== Dashboard Update =====================
+// ========== Dashboard ==========
 async function updateDashboard() {
   try {
     const status = await fetchNodeStatus();
@@ -116,19 +125,19 @@ async function updateDashboard() {
       }
     }
   }
-  // Uptime
+  // Uptime & records
   try {
     const hubData = await fetchDataRange('esp32_1', 'daily', today);
     if (hubData.length) {
       const firstTime = hubData[0].time;
       const firstDate = new Date(today + 'T' + firstTime);
       const uptimeMs = Date.now() - firstDate;
-      document.getElementById('sys-uptime').textContent = `${Math.floor(uptimeMs/3600000)}h ${Math.floor((uptimeMs%3600000)/60000)}m`;
+      document.getElementById('sys-uptime').textContent = `⏱️ ${Math.floor(uptimeMs/3600000)}h ${Math.floor((uptimeMs%3600000)/60000)}m`;
+      document.getElementById('total-records').textContent = `📊 ${hubData.length}`;
     }
   } catch(e) {}
-  document.getElementById('total-records').textContent = (await fetchDataRange('esp32_1','daily',today)).length;
 }
-setInterval(updateDashboard, 60000);
+setInterval(updateDashboard, 30000);
 updateDashboard();
 
 function setBackgroundByTemp(temp) {
@@ -138,7 +147,7 @@ function setBackgroundByTemp(temp) {
   else document.body.classList.add('temp-hot');
 }
 
-// ===================== Chart =====================
+// ========== Chart ==========
 async function drawChart() {
   const board = currentBoard; const range = currentRange; const date = currentDate;
   if (board === 'combined') {
@@ -150,14 +159,19 @@ async function drawChart() {
       data: {
         labels,
         datasets: [
-          { label: 'Room1 Temp', data: data1.map(d=>d.temp), borderColor:'#ff6ec7', yAxisID:'y', pointRadius:0 },
-          { label: 'Room2 Temp', data: data2.map(d=>d.temp), borderColor:'#ff9900', yAxisID:'y', pointRadius:0 },
-          { label: 'Room1 Hum', data: data1.map(d=>d.humidity), borderColor:'#0ff', yAxisID:'y1', pointRadius:0 },
-          { label: 'Room2 Hum', data: data2.map(d=>d.humidity), borderColor:'#00ff99', yAxisID:'y1', pointRadius:0 }
+          { label: 'Room1 Temp', data: data1.map(d=>d.temp), borderColor:'#ff6ec7', yAxisID:'y', pointRadius:0, tension:0.3 },
+          { label: 'Room2 Temp', data: data2.map(d=>d.temp), borderColor:'#ff9900', yAxisID:'y', pointRadius:0, tension:0.3 },
+          { label: 'Room1 Hum', data: data1.map(d=>d.humidity), borderColor:'#0ff', yAxisID:'y1', pointRadius:0, tension:0.3 },
+          { label: 'Room2 Hum', data: data2.map(d=>d.humidity), borderColor:'#00ff99', yAxisID:'y1', pointRadius:0, tension:0.3 }
         ]
       },
-      options: { responsive:true, maintainAspectRatio:false, plugins:{ zoom:{ zoom:{ wheel:{enabled:true}, pinch:{enabled:true}, mode:'x'}, pan:{enabled:true, mode:'x'} } },
-        scales: { y:{ type:'linear', position:'left', title:{display:true, text:'Temperature'} }, y1:{ type:'linear', position:'right', title:{display:true, text:'Humidity'}, grid:{drawOnChartArea:false} } }
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        plugins: { zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } } },
+        scales: {
+          y: { type:'linear', position:'left', title:{display:true, text:'Temperature (°C)'} },
+          y1: { type:'linear', position:'right', title:{display:true, text:'Humidity (%)'}, grid:{drawOnChartArea:false} }
+        }
       }
     });
   } else {
@@ -168,12 +182,17 @@ async function drawChart() {
       data: {
         labels: data.map(d=>d.time),
         datasets: [
-          { label: 'Temperature', data: data.map(d=>d.temp), borderColor:'#ff6ec7', yAxisID:'y', fill:true, backgroundColor:'rgba(255,110,199,0.1)', pointRadius:0 },
-          { label: 'Humidity', data: data.map(d=>d.humidity), borderColor:'#0ff', yAxisID:'y1', fill:true, backgroundColor:'rgba(0,255,255,0.1)', pointRadius:0 }
+          { label: 'Temperature', data: data.map(d=>d.temp), borderColor:'#ff6ec7', yAxisID:'y', fill:true, backgroundColor:'rgba(255,110,199,0.1)', pointRadius:0, tension:0.3 },
+          { label: 'Humidity', data: data.map(d=>d.humidity), borderColor:'#0ff', yAxisID:'y1', fill:true, backgroundColor:'rgba(0,255,255,0.1)', pointRadius:0, tension:0.3 }
         ]
       },
-      options: { responsive:true, maintainAspectRatio:false, plugins:{ zoom:{ zoom:{ wheel:{enabled:true}, pinch:{enabled:true}, mode:'x'}, pan:{enabled:true, mode:'x'} } },
-        scales: { y:{ type:'linear', position:'left', title:{display:true, text:'Temperature'} }, y1:{ type:'linear', position:'right', title:{display:true, text:'Humidity'}, grid:{drawOnChartArea:false} } }
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        plugins: { zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } } },
+        scales: {
+          y: { type:'linear', position:'left', title:{display:true, text:'Temperature (°C)'} },
+          y1: { type:'linear', position:'right', title:{display:true, text:'Humidity (%)'}, grid:{drawOnChartArea:false} }
+        }
       }
     });
   }
@@ -184,15 +203,7 @@ document.querySelectorAll('.range-btn').forEach(btn => btn.addEventListener('cli
 document.getElementById('board-select').addEventListener('change', (e) => { currentBoard = e.target.value; drawChart(); });
 document.getElementById('chart-date').addEventListener('change', (e) => { currentDate = e.target.value; drawChart(); });
 
-// ===================== Power Outage =====================
-async function fetchOutageCountdown() {
-  try {
-    const resp = await fetch(API + '/api/outage/countdown');
-    const data = await resp.json();
-    updateCountdownUI(data);
-  } catch(e) { console.error(e); }
-}
-
+// ========== Outage ==========
 function updateCountdownUI(data) {
   const msgEl = document.getElementById('countdown-text');
   const barEl = document.getElementById('outage-progress');
@@ -200,6 +211,7 @@ function updateCountdownUI(data) {
   const endEl = document.getElementById('outage-end-time');
   const liveIndicator = document.getElementById('live-indicator');
   const powerStatus = document.getElementById('power-status');
+  const countdownBadge = document.getElementById('outage-countdown');
 
   const today = new Date().toISOString().slice(0,10);
   const sched = outageSchedule[today];
@@ -209,10 +221,11 @@ function updateCountdownUI(data) {
   }
 
   if (data.status === 'no_data') {
-    msgEl.textContent = 'No schedule for today';
+    msgEl.textContent = '❌ No schedule for today';
     barEl.style.width = '0%';
     liveIndicator.style.color = '#f00';
     powerStatus.textContent = '⚡ Power: Unknown';
+    countdownBadge.textContent = '⏳ No data';
     return;
   }
 
@@ -221,30 +234,33 @@ function updateCountdownUI(data) {
     barEl.style.width = '0%';
     liveIndicator.style.color = '#0f0';
     powerStatus.textContent = '⚡ Power: On';
+    countdownBadge.textContent = `⏳ ${data.message}`;
   } else if (data.status === 'during') {
     msgEl.textContent = data.message;
     const startSec = timeToSeconds(sched.start);
     const endSec = timeToSeconds(sched.end);
     const nowSec = timeToSeconds(new Date().toTimeString().slice(0,8));
     const progress = ((nowSec - startSec) / (endSec - startSec)) * 100;
-    barEl.style.width = progress + '%';
+    barEl.style.width = Math.min(progress, 100) + '%';
     liveIndicator.style.color = '#f00';
     powerStatus.textContent = '⚡ Power: Off';
+    countdownBadge.textContent = `⏳ ${data.message}`;
   } else { // after
     msgEl.textContent = data.message;
     barEl.style.width = '100%';
     liveIndicator.style.color = '#0f0';
     powerStatus.textContent = '⚡ Power: On';
+    countdownBadge.textContent = '✅ Power On';
   }
 }
 
 async function loadOutageSchedule() {
   try {
-    const resp = await fetch(API + '/api/outage');
-    outageSchedule = await resp.json();
+    outageSchedule = await fetchOutageSchedule();
     const today = new Date().toISOString().slice(0,10);
     const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0,10);
     const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0,10);
+    const dayafter = new Date(Date.now() + 2*86400000).toISOString().slice(0,10);
 
     const updateDay = (date, prefix) => {
       const elDate = document.getElementById(prefix + '-date');
@@ -263,15 +279,20 @@ async function loadOutageSchedule() {
     updateDay(yesterday, 'yesterday');
     updateDay(today, 'today');
     updateDay(tomorrow, 'tomorrow');
+    updateDay(dayafter, 'dayafter');
 
-    fetchOutageCountdown();
+    const countdown = await fetchOutageCountdown();
+    updateCountdownUI(countdown);
     if (outageTimer) clearInterval(outageTimer);
-    outageTimer = setInterval(fetchOutageCountdown, 1000);
+    outageTimer = setInterval(async () => {
+      const c = await fetchOutageCountdown();
+      updateCountdownUI(c);
+    }, 1000);
   } catch(e) { console.error(e); }
 }
 loadOutageSchedule();
 
-// Edit outage modal
+// Edit outage
 document.getElementById('edit-outage-btn').addEventListener('click', () => {
   document.getElementById('outage-modal').classList.remove('hidden');
   document.getElementById('outage-date').value = new Date().toISOString().slice(0,10);
@@ -290,7 +311,7 @@ document.getElementById('save-outage').addEventListener('click', async () => {
   loadOutageSchedule();
 });
 
-// ===================== File Manager =====================
+// ========== File Manager ==========
 async function loadFiles() {
   const files = await (await fetch(API+'/api/files')).json();
   const tbody = document.querySelector('#file-table tbody');
@@ -308,11 +329,11 @@ document.getElementById('upload-input').onchange = async (e) => {
     const fd = new FormData(); fd.append('file', file); fd.append('dir', dir);
     await fetch(API+'/api/upload', {method:'POST', body:fd});
   }
-  document.getElementById('upload-status').textContent = 'Upload complete.'; loadFiles();
+  document.getElementById('upload-status').textContent = '✅ Upload complete.'; loadFiles();
 };
 loadFiles();
 
-// ===================== Theme & Language =====================
+// ========== Theme & Lang ==========
 document.querySelectorAll('[data-theme]').forEach(btn => {
   btn.addEventListener('click', () => {
     theme = btn.dataset.theme;
@@ -332,7 +353,7 @@ document.getElementById('fullscreen-btn').onclick = () => {
   else document.exitFullscreen();
 };
 
-// ===================== Data Table Modal =====================
+// ========== Data Table Modal ==========
 document.getElementById('view-table-btn').addEventListener('click', async () => {
   document.getElementById('data-modal').classList.remove('hidden');
   const data = await fetchDataRange(currentBoard, currentRange, currentDate);
@@ -345,4 +366,19 @@ document.getElementById('export-modal-csv').addEventListener('click', () => {
   const csv = rows.map(r => r.join(',')).join('\n');
   const blob = new Blob([csv], {type:'text/csv'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.csv'; a.click();
+});
+
+// Export CSV buttons on room cards
+document.querySelectorAll('.export-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const board = btn.dataset.board;
+    const today = new Date().toISOString().slice(0,10);
+    const data = await fetchDataRange(board, 'daily', today);
+    if (!data.length) return alert('No data for today');
+    const rows = [['Time','Temperature','Humidity']];
+    data.forEach(d => rows.push([d.time, d.temp, d.humidity]));
+    const csv = rows.map(r => r.join(',')).join('\n');
+    const blob = new Blob([csv], {type:'text/csv'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${board}_${today}.csv`; a.click();
+  });
 });
