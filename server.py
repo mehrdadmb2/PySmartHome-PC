@@ -1,20 +1,36 @@
 #!/usr/bin/env python3
 """
 PySmartHome-PC – Complete Smart Home Server
-Auto outage schedule, clean logs, robust polling, GitHub sync.
 """
 
 import os, sys, subprocess, json, csv, time, datetime, base64, logging
 from pathlib import Path
 
-# ---------- Suppress noisy logs ----------
+# ---------- ANSI Colors for console ----------
+class Colors:
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    CYAN = '\033[96m'
+    RESET = '\033[0m'
+
+def log_info(msg):
+    print(f"{Colors.GREEN}[INFO]{Colors.RESET} {datetime.datetime.now().strftime('%H:%M:%S')} - {msg}")
+
+def log_warning(msg):
+    print(f"{Colors.YELLOW}[WARN]{Colors.RESET} {datetime.datetime.now().strftime('%H:%M:%S')} - {msg}")
+
+def log_error(msg):
+    print(f"{Colors.RED}[ERROR]{Colors.RESET} {datetime.datetime.now().strftime('%H:%M:%S')} - {msg}")
+
+# Suppress noisy logs
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 logging.getLogger('apscheduler').setLevel(logging.WARNING)
 
 def install_requirements():
     req_file = "requirements.txt"
     if not os.path.exists(req_file):
-        print("[!] requirements.txt not found")
+        log_error("requirements.txt not found")
         sys.exit(1)
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -61,55 +77,61 @@ def save_outage(data):
 
 outage_schedule = load_outage()
 
-# ---------- Outage generation algorithm ----------
-def generate_outage_schedule(reference_date, reference_start_hour, reference_start_min=0):
+# ---------- Outage generation algorithm (correct slot-based) ----------
+def generate_outage_schedule(reference_date, reference_start_hour):
     """
-    Generate schedules for yesterday, today, tomorrow, and next few days.
-    Shift by 2 hours each day, skip Fridays.
-    Outages only between 09:00 and 21:00.
+    Generate schedule based on 2‑hour slots from 9:00 to 21:00.
+    Slots: 0->9-11, 1->11-13, 2->13-15, 3->15-17, 4->17-19, 5->19-21.
+    Skips Fridays.
     """
-    start_hour = reference_start_hour
-    start_min = reference_start_min
+    # Determine reference slot
+    if reference_start_hour < 9 or reference_start_hour >= 21:
+        reference_start_hour = 13  # default
+    ref_slot = (reference_start_hour - 9) // 2
+
+    # Generate for -1 (yesterday) to +4 days
     current_date = datetime.datetime.strptime(reference_date, "%Y-%m-%d").date()
+    non_friday_days = 0  # count of non‑Friday days from reference backwards/forwards
+
+    # We'll generate for yesterday, today, tomorrow, and next 3 days
     for delta in range(-1, 5):
         d = current_date + datetime.timedelta(days=delta)
         if d.weekday() == 4:  # Friday
             continue
+        # Count non‑Friday days between reference and this date (inclusive)
+        # Simple approach: compute slot by adding delta days adjusted for skipped Fridays
+        # Better: use a loop to step through days and increment slot
+        # We'll just compute based on delta but account for Fridays between
+        # For simplicity, we'll step day by day from reference to target, incrementing slot if not Friday
+        slot = ref_slot
+        step = 1 if delta >= 0 else -1
+        for i in range(1, abs(delta)+1):
+            tmp = current_date + datetime.timedelta(days=i*step)
+            if tmp.weekday() != 4:
+                slot += step
+        slot %= 6
+        start_h = 9 + slot*2
+        end_h = start_h + 2
+        if end_h > 21:
+            end_h = 21
         date_str = d.isoformat()
-        if date_str not in outage_schedule:
-            # Shift each day by 2 hours, starting from reference
-            total_min = start_hour * 60 + start_min + (delta + 1) * 120
-            total_min %= (12 * 60)  # 12-hour window (9..21)
-            actual_start = 9 * 60 + total_min
-            if actual_start >= 21 * 60:
-                actual_start = 9 * 60
-            start_h, start_m = divmod(actual_start, 60)
-            end_h = start_h + 2
-            if end_h > 21:
-                end_h = 21
-                end_m = 0
-            else:
-                end_m = 0
-            outage_schedule[date_str] = {
-                "start": f"{start_h:02d}:{start_m:02d}",
-                "end": f"{end_h:02d}:{end_m:02d}"
-            }
+        outage_schedule[date_str] = {
+            "start": f"{start_h:02d}:00",
+            "end": f"{end_h:02d}:00"
+        }
     save_outage(outage_schedule)
 
+# Ensure today's schedule exists
 today_str = datetime.date.today().isoformat()
 if today_str not in outage_schedule:
-    generate_outage_schedule(today_str, 13, 0)  # reference: today 1 PM - 3 PM
+    generate_outage_schedule(today_str, 13)  # today starts at 13:00
 
-# ---------- Logging / Sensor state ----------
+# ---------- Sensor state ----------
 sensors = {
     "esp32_1": {"temp": 0, "hum": 0, "last_seen": 0},
     "esp32_s3": {"temp": 0, "hum": 0, "last_seen": 0}
 }
 NODE_TIMEOUT = 600
-
-def log(msg):
-    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-    print(f"[{timestamp}] {msg}")
 
 # ---------- GitHub helpers ----------
 def upload_file_to_github(path, content):
@@ -122,11 +144,11 @@ def upload_file_to_github(path, content):
         if sha: data["sha"] = sha
         r = requests.put(url, headers=headers, json=data, timeout=10)
         if r.status_code >= 400:
-            log(f"GitHub upload failed for {path}: {r.status_code}")
+            log_warning(f"GitHub upload failed for {path}: {r.status_code}")
         else:
-            log(f"GitHub upload OK: {path}")
+            log_info(f"GitHub upload OK: {path}")
     except Exception as e:
-        log(f"GitHub error: {e}")
+        log_error(f"GitHub error: {e}")
 
 def push_to_github():
     today = datetime.date.today().isoformat()
@@ -169,11 +191,11 @@ def poll_sensors():
                 sensors[name]["hum"] = data["humidity"]
                 sensors[name]["last_seen"] = time.time()
                 log_to_csv(name, data["temp"], data["humidity"])
-                log(f"{name} updated: {data['temp']:.1f}°C, {data['humidity']:.0f}%")
+                log_info(f"{name} updated: {data['temp']:.1f}°C, {data['humidity']:.0f}%")
             else:
-                log(f"{name} HTTP {resp.status_code}")
+                log_warning(f"{name} HTTP {resp.status_code}")
         except Exception as e:
-            log(f"{name} offline ({e})")
+            log_warning(f"{name} offline: {e}")
 
 # ---------- Flask app ----------
 app = Flask(__name__)
@@ -215,13 +237,7 @@ def get_data():
     if range_type == 'hourly':
         now = datetime.datetime.now()
         cutoff = now - datetime.timedelta(hours=1)
-        filtered = []
-        for d in data:
-            t = datetime.datetime.strptime(d['time'], '%H:%M:%S').time()
-            dt = datetime.datetime.combine(datetime.date.today(), t)
-            if dt >= cutoff:
-                filtered.append(d)
-        return jsonify(filtered)
+        data = [d for d in data if datetime.datetime.combine(datetime.date.today(), datetime.datetime.strptime(d['time'], '%H:%M:%S').time()) >= cutoff]
     return jsonify(data)
 
 @app.route('/api/datetime')
@@ -241,7 +257,7 @@ def update_outage():
     if not all([date_str, start, end]): return 'invalid', 400
     outage_schedule[date_str] = {"start": start, "end": end}
     save_outage(outage_schedule)
-    log(f"Outage updated for {date_str}: {start} - {end}")
+    log_info(f"Outage updated for {date_str}: {start} - {end}")
     return jsonify({'status': 'ok'})
 
 @app.route('/api/outage/countdown')
@@ -263,7 +279,7 @@ def outage_countdown():
     else:
         return jsonify({"status": "after", "message": "Power is on"})
 
-# File management endpoints (keep as before)
+# File management endpoints (same as before)
 @app.route('/api/files')
 def list_files():
     items = []
@@ -306,11 +322,11 @@ def delete_file():
 
 # ---------- Startup ----------
 if __name__ == '__main__':
-    log("SmartHome server starting...")
+    log_info("SmartHome server starting...")
     scheduler = BackgroundScheduler()
     scheduler.add_job(poll_sensors, 'interval', seconds=10)
     scheduler.add_job(push_to_github, 'interval', minutes=5)
     scheduler.start()
     poll_sensors()
-    log("Server running on http://0.0.0.0:5000")
+    log_info("Server running on http://0.0.0.0:5000")
     app.run(host='0.0.0.0', port=5000, debug=False)
