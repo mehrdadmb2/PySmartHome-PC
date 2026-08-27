@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-PySmartHome-PC – Complete Server with Auto Outage Schedule
+PySmartHome-PC – Complete Smart Home Server
+Auto outage schedule, clean logs, robust polling, GitHub sync.
 """
 
 import os, sys, subprocess, json, csv, time, datetime, base64, logging
@@ -63,31 +64,28 @@ outage_schedule = load_outage()
 # ---------- Outage generation algorithm ----------
 def generate_outage_schedule(reference_date, reference_start_hour, reference_start_min=0):
     """
-    Generate a schedule for a range of dates based on a reference.
-    Shifts by 2 hours each day. Skips Fridays.
-    Only between 09:00 and 21:00.
+    Generate schedules for yesterday, today, tomorrow, and next few days.
+    Shift by 2 hours each day, skip Fridays.
+    Outages only between 09:00 and 21:00.
     """
     start_hour = reference_start_hour
     start_min = reference_start_min
     current_date = datetime.datetime.strptime(reference_date, "%Y-%m-%d").date()
-    # Generate for yesterday, today, tomorrow and next few days
     for delta in range(-1, 5):
         d = current_date + datetime.timedelta(days=delta)
-        # Skip if Friday (weekday 4)
-        if d.weekday() == 4:
+        if d.weekday() == 4:  # Friday
             continue
         date_str = d.isoformat()
         if date_str not in outage_schedule:
-            # Convert to minutes and ensure within 9:00-21:00
-            total_min = start_hour * 60 + start_min + (delta + 1) * 120  # shift by 2 hours each day
-            total_min %= (12 * 60)  # wrap around 12-hour window from 9 to 21
+            # Shift each day by 2 hours, starting from reference
+            total_min = start_hour * 60 + start_min + (delta + 1) * 120
+            total_min %= (12 * 60)  # 12-hour window (9..21)
             actual_start = 9 * 60 + total_min
-            # If wraps past 21:00, reset to 9:00
             if actual_start >= 21 * 60:
                 actual_start = 9 * 60
             start_h, start_m = divmod(actual_start, 60)
             end_h = start_h + 2
-            if end_h > 21:  # if crosses 21, wrap to 9 next day? but we don't do next day, just cap at 21
+            if end_h > 21:
                 end_h = 21
                 end_m = 0
             else:
@@ -98,11 +96,9 @@ def generate_outage_schedule(reference_date, reference_start_hour, reference_sta
             }
     save_outage(outage_schedule)
 
-# Set default if today missing
 today_str = datetime.date.today().isoformat()
 if today_str not in outage_schedule:
-    # Use reference: today 1 PM to 3 PM
-    generate_outage_schedule(today_str, 13, 0)
+    generate_outage_schedule(today_str, 13, 0)  # reference: today 1 PM - 3 PM
 
 # ---------- Logging / Sensor state ----------
 sensors = {
@@ -219,7 +215,13 @@ def get_data():
     if range_type == 'hourly':
         now = datetime.datetime.now()
         cutoff = now - datetime.timedelta(hours=1)
-        data = [d for d in data if datetime.datetime.combine(datetime.date.today(), datetime.datetime.strptime(d['time'], '%H:%M:%S').time()) >= cutoff]
+        filtered = []
+        for d in data:
+            t = datetime.datetime.strptime(d['time'], '%H:%M:%S').time()
+            dt = datetime.datetime.combine(datetime.date.today(), t)
+            if dt >= cutoff:
+                filtered.append(d)
+        return jsonify(filtered)
     return jsonify(data)
 
 @app.route('/api/datetime')
@@ -261,8 +263,48 @@ def outage_countdown():
     else:
         return jsonify({"status": "after", "message": "Power is on"})
 
-# File management endpoints unchanged (same as before)
+# File management endpoints (keep as before)
+@app.route('/api/files')
+def list_files():
+    items = []
+    for dirpath, dirnames, filenames in os.walk('.'):
+        if '.git' in dirpath or '__pycache__' in dirpath:
+            continue
+        for name in filenames:
+            if name.startswith('.'):
+                continue
+            full = os.path.relpath(os.path.join(dirpath, name)).replace('\\', '/')
+            items.append({'name': name, 'path': full, 'size': os.path.getsize(full), 'is_dir': False})
+    return jsonify(items)
 
+@app.route('/api/download')
+def download_file():
+    path = request.args.get('path', '')
+    if '..' in path or not path: return 'forbidden', 403
+    return send_from_directory(os.getcwd(), path, as_attachment=True)
+
+@app.route('/api/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files: return 'no file', 400
+    file = request.files['file']
+    dir_path = request.form.get('dir', 'www/')
+    full_dir = os.path.join(os.getcwd(), dir_path)
+    os.makedirs(full_dir, exist_ok=True)
+    filename = secure_filename(file.filename)
+    file.save(os.path.join(full_dir, filename))
+    return 'uploaded', 200
+
+@app.route('/api/delete', methods=['GET'])
+def delete_file():
+    path = request.args.get('path', '')
+    if '..' in path or not path: return 'forbidden', 403
+    full = os.path.join(os.getcwd(), path)
+    if os.path.exists(full):
+        os.remove(full)
+        return 'deleted', 200
+    return 'not found', 404
+
+# ---------- Startup ----------
 if __name__ == '__main__':
     log("SmartHome server starting...")
     scheduler = BackgroundScheduler()
