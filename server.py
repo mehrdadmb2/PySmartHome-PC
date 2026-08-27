@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 PySmartHome-PC – Complete Smart Home Server
+Robust, clean logs, auto outage schedule, GitHub sync.
 """
 
 import os, sys, subprocess, json, csv, time, datetime, base64, logging
 from pathlib import Path
 
-# ---------- ANSI Colors for console ----------
+# ---------- ANSI Colors ----------
 class Colors:
     GREEN = '\033[92m'
     YELLOW = '\033[93m'
@@ -77,40 +78,32 @@ def save_outage(data):
 
 outage_schedule = load_outage()
 
-# ---------- Outage generation algorithm (correct slot-based) ----------
+# ---------- Outage generation algorithm ----------
 def generate_outage_schedule(reference_date, reference_start_hour):
     """
-    Generate schedule based on 2‑hour slots from 9:00 to 21:00.
-    Slots: 0->9-11, 1->11-13, 2->13-15, 3->15-17, 4->17-19, 5->19-21.
+    Generate schedule for yesterday, today, tomorrow, and next few days.
+    Slots: 9-11, 11-13, 13-15, 15-17, 17-19, 19-21.
     Skips Fridays.
     """
-    # Determine reference slot
-    if reference_start_hour < 9 or reference_start_hour >= 21:
+    slots = [9, 11, 13, 15, 17, 19]  # start hours
+    if reference_start_hour not in slots:
         reference_start_hour = 13  # default
-    ref_slot = (reference_start_hour - 9) // 2
-
-    # Generate for -1 (yesterday) to +4 days
+    ref_slot = slots.index(reference_start_hour)
     current_date = datetime.datetime.strptime(reference_date, "%Y-%m-%d").date()
-    non_friday_days = 0  # count of non‑Friday days from reference backwards/forwards
 
-    # We'll generate for yesterday, today, tomorrow, and next 3 days
     for delta in range(-1, 5):
         d = current_date + datetime.timedelta(days=delta)
         if d.weekday() == 4:  # Friday
             continue
-        # Count non‑Friday days between reference and this date (inclusive)
-        # Simple approach: compute slot by adding delta days adjusted for skipped Fridays
-        # Better: use a loop to step through days and increment slot
-        # We'll just compute based on delta but account for Fridays between
-        # For simplicity, we'll step day by day from reference to target, incrementing slot if not Friday
-        slot = ref_slot
+        # Count non-Friday days between reference and d
+        non_friday_count = 0
         step = 1 if delta >= 0 else -1
         for i in range(1, abs(delta)+1):
             tmp = current_date + datetime.timedelta(days=i*step)
             if tmp.weekday() != 4:
-                slot += step
-        slot %= 6
-        start_h = 9 + slot*2
+                non_friday_count += 1
+        slot = (ref_slot + step * non_friday_count) % len(slots)
+        start_h = slots[slot]
         end_h = start_h + 2
         if end_h > 21:
             end_h = 21
@@ -121,10 +114,9 @@ def generate_outage_schedule(reference_date, reference_start_hour):
         }
     save_outage(outage_schedule)
 
-# Ensure today's schedule exists
 today_str = datetime.date.today().isoformat()
 if today_str not in outage_schedule:
-    generate_outage_schedule(today_str, 13)  # today starts at 13:00
+    generate_outage_schedule(today_str, 13)  # reference today 1 PM - 3 PM
 
 # ---------- Sensor state ----------
 sensors = {
