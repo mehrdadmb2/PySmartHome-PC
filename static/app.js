@@ -48,8 +48,21 @@ function initParticles() {
 initParticles();
 
 // ===================== Helpers =====================
-function gregorianToJalali(gy, gm, gd) { /* same as before */ }
-function formatPersianDate(dateStr) { /* same as before */ }
+function gregorianToJalali(gy, gm, gd) {
+  const gy2 = (gm > 2) ? (gy + 1) : gy;
+  let days = 355666 + (365 * gy) + Math.floor((gy2 + 3) / 4) - Math.floor((gy2 + 99) / 100) + Math.floor((gy2 + 399) / 400) + gd + Math.floor((153 * (gm > 2 ? (gm - 3) : (gm + 9)) + 2) / 5);
+  let jy = -1595 + (33 * Math.floor(days / 12053));
+  days %= 12053; jy += 4 * Math.floor(days / 1461); days %= 1461;
+  if (days > 365) { jy += Math.floor((days - 1) / 365); days = (days - 1) % 365; }
+  const jm = (days < 186) ? 1 + Math.floor(days / 31) : 7 + Math.floor((days - 186) / 30);
+  const jd = 1 + ((days < 186) ? (days % 31) : ((days - 186) % 30));
+  return { year: jy, month: jm, day: jd };
+}
+function formatPersianDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const j = gregorianToJalali(d.getFullYear(), d.getMonth()+1, d.getDate());
+  return `${j.year}/${String(j.month).padStart(2,'0')}/${String(j.day).padStart(2,'0')}`;
+}
 function timeToSeconds(timeStr) { const [h,m]=timeStr.split(':').map(Number); return h*3600+m*60; }
 
 function updateDateTime() {
@@ -86,10 +99,8 @@ async function updateDashboard() {
       document.getElementById('minmax-t'+i).textContent = `${Math.min(...temps).toFixed(1)} / ${Math.max(...temps).toFixed(1)}`;
       document.getElementById('count'+i).textContent = data.length;
 
-      // Dynamic background based on temp
       if (i===1) setBackgroundByTemp(last.temp);
 
-      // Trend vs yesterday
       const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
       const yesterdayData = await fetchDataRange(board, 'daily', yesterday);
       if (yesterdayData.length) {
@@ -280,8 +291,26 @@ document.getElementById('save-outage').addEventListener('click', async () => {
 });
 
 // ===================== File Manager =====================
-async function loadFiles() { /* same as before */ }
-// ... (implement file manager functions as in previous full code)
+async function loadFiles() {
+  const files = await (await fetch(API+'/api/files')).json();
+  const tbody = document.querySelector('#file-table tbody');
+  tbody.innerHTML = files.map(f => `<tr><td>${f.name}</td><td>${(f.size/1024).toFixed(1)}</td><td><button onclick="window.open('${API}/api/download?path=${encodeURIComponent(f.path)}')">⬇️</button><button onclick="deleteFile('${f.path}')">🗑️</button></td></tr>`).join('');
+}
+async function deleteFile(path) { if(confirm('Delete?')) { await fetch(`${API}/api/delete?path=${encodeURIComponent(path)}`); loadFiles(); } }
+document.getElementById('refresh-files').onclick = loadFiles;
+document.getElementById('download-all').onclick = async () => {
+  const files = await (await fetch(API+'/api/files')).json();
+  files.forEach((f,i) => setTimeout(() => { const a=document.createElement('a'); a.href=API+'/api/download?path='+encodeURIComponent(f.path); a.download=f.name; a.click(); }, i*300));
+};
+document.getElementById('upload-input').onchange = async (e) => {
+  const dir = document.getElementById('upload-dir').value || '/www/';
+  for(const file of e.target.files) {
+    const fd = new FormData(); fd.append('file', file); fd.append('dir', dir);
+    await fetch(API+'/api/upload', {method:'POST', body:fd});
+  }
+  document.getElementById('upload-status').textContent = 'Upload complete.'; loadFiles();
+};
+loadFiles();
 
 // ===================== Theme & Language =====================
 document.querySelectorAll('[data-theme]').forEach(btn => {
@@ -310,4 +339,10 @@ document.getElementById('view-table-btn').addEventListener('click', async () => 
   document.querySelector('#data-table tbody').innerHTML = data.map(d => `<tr><td>${d.time}</td><td>${d.temp.toFixed(1)}</td><td>${d.humidity.toFixed(0)}</td></tr>`).join('');
 });
 document.getElementById('close-modal').addEventListener('click', () => document.getElementById('data-modal').classList.add('hidden'));
-document.getElementById('export-modal-csv').addEventListener('click', () => { /* same as before */ });
+document.getElementById('export-modal-csv').addEventListener('click', () => {
+  const rows = [['Time','Temperature','Humidity']];
+  document.querySelectorAll('#data-table tbody tr').forEach(row => { const cells = row.querySelectorAll('td'); rows.push([cells[0].textContent, cells[1].textContent, cells[2].textContent]); });
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.csv'; a.click();
+});
