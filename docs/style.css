@@ -1,324 +1,252 @@
-/* ========== Global Variables ========== */
-:root {
-  --bg: #0a0a1a;
-  --card-bg: rgba(15, 20, 35, 0.6);
-  --border: rgba(0, 255, 255, 0.25);
-  --text: #e0e0e0;
-  --neon-cyan: #0ff;
-  --neon-pink: #ff00ff;
-  --neon-purple: #b44dff;
-  --green: #0f0;
-  --red: #f00;
-  --warning: #ff0;
-  --transition: 0.3s ease;
-  --font-body: 'Roboto', sans-serif;
-  --font-heading: 'Orbitron', sans-serif;
-  --glass-blur: 20px;
+const REPO_RAW = 'https://raw.githubusercontent.com/mehrdadmb2/PySmartHome-PC/main/';
+const TEMP_THRESHOLD = 35;
+
+let lang = localStorage.getItem('lang') || 'en';
+let theme = localStorage.getItem('theme') || 'cyberpunk';
+let currentBoard = 'esp32_1';
+let currentRange = 'daily';
+let currentDate = new Date().toISOString().slice(0,10);
+let chart;
+let outageTimerOnline = null;
+let outageSchedule = {};
+
+document.documentElement.setAttribute('data-theme', theme);
+document.documentElement.lang = lang;
+document.dir = lang === 'fa' ? 'rtl' : 'ltr';
+updateDateTime(); setInterval(updateDateTime, 1000);
+
+// Particles (همان)
+function initParticles() { /* کد مشابه قبل */ }
+initParticles();
+
+// Helpers (همان)
+function gregorianToJalali(gy, gm, gd) { /* ... */ }
+function formatPersianDate(dateStr) { /* ... */ }
+function timeToSeconds(timeStr) { /* ... */ }
+function formatTime(seconds) { /* ... */ }
+
+function updateDateTime() { /* ... */ }
+
+// ========== Fetch از GitHub ==========
+async function fetchCSV(board, date) {
+  const url = REPO_RAW + 'data/' + board + '_' + date + '.csv';
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return [];
+    const text = await resp.text();
+    const result = Papa.parse(text, { header: true, dynamicTyping: true });
+    return result.data.filter(row => row.time);
+  } catch(e) { return []; }
+}
+async function fetchStatus() { const r = await fetch(REPO_RAW + 'status.json'); return r.json(); }
+async function fetchOutageOnline() { const r = await fetch(REPO_RAW + 'outage_schedule.json'); return r.json(); }
+
+// توابع دریافت داده با محدوده (مشابه قبل ولی با fetchCSV)
+async function getDataRange(board, range, endDate) {
+  let dates = [];
+  const end = new Date(endDate);
+  if (range === 'daily') dates.push(end.toISOString().slice(0,10));
+  else if (range === 'yesterday') { const y = new Date(end); y.setDate(y.getDate()-1); dates.push(y.toISOString().slice(0,10)); }
+  else if (range === 'weekly') { for(let i=6;i>=0;i--) { const d=new Date(end); d.setDate(d.getDate()-i); dates.push(d.toISOString().slice(0,10)); } }
+  else if (range === 'monthly') { for(let i=29;i>=0;i--) { const d=new Date(end); d.setDate(d.getDate()-i); dates.push(d.toISOString().slice(0,10)); } }
+  let all = [];
+  for(const date of dates) {
+    const dayData = await fetchCSV(board, date);
+    all = all.concat(dayData.map(d => ({...d, date})));
+  }
+  return all;
 }
 
-/* Themes */
-[data-theme="light"] {
-  --bg: #f0f4f8;
-  --card-bg: rgba(255,255,255,0.8);
-  --border: rgba(0,0,0,0.15);
-  --text: #1a1a2e;
-  --neon-cyan: #0077ff;
-  --neon-pink: #c300ff;
-  --neon-purple: #8a2be2;
-  --font-body: 'Roboto', sans-serif;
-  --font-heading: 'Orbitron', sans-serif;
+// ========== Dashboard ==========
+async function updateDashboard() {
+  try {
+    const status = await fetchStatus();
+    document.querySelector('#node-hub .status-dot').style.background = status.esp32_1_online ? '#0f0' : '#f00';
+    document.querySelector('#node-s3 .status-dot').style.background = status.esp32_s3_online ? '#0f0' : '#f00';
+    document.querySelector('#node-hub .node-status-text').textContent = status.esp32_1_online ? 'Online' : 'Offline';
+    document.querySelector('#node-s3 .node-status-text').textContent = status.esp32_s3_online ? 'Online' : 'Offline';
+    if (status.last_push) {
+      document.getElementById('last-update-time').textContent = '🔄 Last update: ' + new Date(status.last_push).toLocaleTimeString();
+    }
+  } catch(e) {}
+
+  const today = new Date().toISOString().slice(0,10);
+  for(let i=1; i<=2; i++) {
+    const board = i===1 ? 'esp32_1' : 'esp32_s3';
+    const data = await fetchCSV(board, today);
+    if (data.length) {
+      const last = data[data.length-1];
+      const temps = data.map(d => d.temperature);
+      const hums = data.map(d => d.humidity);
+      document.getElementById('t'+i).textContent = last.temperature.toFixed(1);
+      document.getElementById('h'+i).textContent = last.humidity.toFixed(0);
+      document.getElementById('avg-t'+i).textContent = (temps.reduce((a,b)=>a+b,0)/temps.length).toFixed(1);
+      document.getElementById('minmax-t'+i).textContent = `${Math.min(...temps).toFixed(1)} / ${Math.max(...temps).toFixed(1)}`;
+      document.getElementById('count'+i).textContent = data.length;
+
+      if (i===1) setBackgroundByTemp(last.temperature);
+
+      const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
+      const yesterdayData = await fetchCSV(board, yesterday);
+      if (yesterdayData.length) {
+        const yesterdayAvg = yesterdayData.map(d=>d.temperature).reduce((a,b)=>a+b,0)/yesterdayData.length;
+        const todayAvg = temps.reduce((a,b)=>a+b,0)/temps.length;
+        const trend = todayAvg - yesterdayAvg;
+        document.getElementById('trend'+i).innerHTML = trend > 0.5 ? `📈 +${trend.toFixed(1)}°C` : (trend < -0.5 ? `📉 ${trend.toFixed(1)}°C` : '➡️ Stable');
+      }
+      if (Math.max(...temps) > TEMP_THRESHOLD) {
+        document.querySelector(`#room${i} .alert-badge`).classList.remove('hidden');
+      } else {
+        document.querySelector(`#room${i} .alert-badge`).classList.add('hidden');
+      }
+    }
+  }
+  try {
+    const hubData = await fetchCSV('esp32_1', today);
+    if (hubData.length) {
+      const firstTime = hubData[0].time;
+      const firstDate = new Date(today + 'T' + firstTime);
+      const uptimeMs = Date.now() - firstDate;
+      document.getElementById('sys-uptime').textContent = `⏱️ ${Math.floor(uptimeMs/3600000)}h ${Math.floor((uptimeMs%3600000)/60000)}m`;
+      document.getElementById('total-records').textContent = `📊 ${hubData.length}`;
+    }
+  } catch(e) {}
 }
-[data-theme="retro"] {
-  --bg: #000;
-  --card-bg: rgba(0,30,0,0.85);
-  --border: #0f0;
-  --text: #0f0;
-  --neon-cyan: #0f0;
-  --neon-pink: #0f0;
-  --neon-purple: #0f0;
-  --font-body: 'Share Tech Mono', monospace;
-  --font-heading: 'Share Tech Mono', monospace;
+setInterval(updateDashboard, 30000);
+updateDashboard();
+
+function setBackgroundByTemp(temp) { /* مشابه */ }
+
+// ========== Chart ==========
+async function drawChart() {
+  const board = currentBoard; const range = currentRange; const date = currentDate;
+  if (board === 'combined') {
+    const [data1, data2] = await Promise.all([getDataRange('esp32_1',range,date), getDataRange('esp32_s3',range,date)]);
+    const labels = data1.map(d => d.time);
+    if (chart) chart.destroy();
+    chart = new Chart(document.getElementById('mainChart'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Room1 Temp', data: data1.map(d=>d.temperature), borderColor:'#ff6ec7', yAxisID:'y', pointRadius:0, tension:0.3 },
+          { label: 'Room2 Temp', data: data2.map(d=>d.temperature), borderColor:'#ff9900', yAxisID:'y', pointRadius:0, tension:0.3 },
+          { label: 'Room1 Hum', data: data1.map(d=>d.humidity), borderColor:'#0ff', yAxisID:'y1', pointRadius:0, tension:0.3 },
+          { label: 'Room2 Hum', data: data2.map(d=>d.humidity), borderColor:'#00ff99', yAxisID:'y1', pointRadius:0, tension:0.3 }
+        ]
+      },
+      options: { /* مشابه قبل */ }
+    });
+  } else {
+    const data = await getDataRange(board, range, date);
+    if (chart) chart.destroy();
+    chart = new Chart(document.getElementById('mainChart'), {
+      type: 'line',
+      data: {
+        labels: data.map(d=>d.time),
+        datasets: [
+          { label: 'Temperature', data: data.map(d=>d.temperature), borderColor:'#ff6ec7', yAxisID:'y', fill:true, backgroundColor:'rgba(255,110,199,0.1)', pointRadius:0, tension:0.3 },
+          { label: 'Humidity', data: data.map(d=>d.humidity), borderColor:'#0ff', yAxisID:'y1', fill:true, backgroundColor:'rgba(0,255,255,0.1)', pointRadius:0, tension:0.3 }
+        ]
+      },
+      options: { /* مشابه قبل */ }
+    });
+  }
 }
-[data-theme="forest"] {
-  --bg: #0d1b0e;
-  --card-bg: rgba(20,45,25,0.75);
-  --border: #4caf50;
-  --text: #d4e9d6;
-  --neon-cyan: #8bc34a;
-  --neon-pink: #ff9800;
-  --neon-purple: #9c27b0;
-  --font-body: 'Playfair Display', serif;
-  --font-heading: 'Playfair Display', serif;
-}
-[data-theme="ocean"] {
-  --bg: #001f3f;
-  --card-bg: rgba(0,30,60,0.75);
-  --border: #00bfff;
-  --text: #e0f0ff;
-  --neon-cyan: #00ffff;
-  --neon-pink: #ff69b4;
-  --neon-purple: #7b68ee;
-  --font-body: 'Roboto', sans-serif;
-  --font-heading: 'Orbitron', sans-serif;
-}
-[data-theme="matrix"] {
-  --bg: #000;
-  --card-bg: rgba(0,10,0,0.8);
-  --border: #00ff41;
-  --text: #00ff41;
-  --neon-cyan: #00ff41;
-  --neon-pink: #00ff41;
-  --neon-purple: #00ff41;
-  --font-body: 'Share Tech Mono', monospace;
-  --font-heading: 'Share Tech Mono', monospace;
-}
-[data-theme="sunset"] {
-  --bg: #1a0e0a;
-  --card-bg: rgba(40,20,15,0.7);
-  --border: #ff7e5f;
-  --text: #ffe0c0;
-  --neon-cyan: #ffb347;
-  --neon-pink: #ff6a88;
-  --neon-purple: #ff6a88;
-  --font-body: 'Poppins', sans-serif;
-  --font-heading: 'Poppins', sans-serif;
-}
-[data-theme="aurora"] {
-  --bg: #0b0b2a;
-  --card-bg: rgba(10,20,50,0.7);
-  --border: #7f7fd5;
-  --text: #d4d4f7;
-  --neon-cyan: #86a8e7;
-  --neon-pink: #d4a5f5;
-  --neon-purple: #b47aea;
-  --font-body: 'Rajdhani', sans-serif;
-  --font-heading: 'Rajdhani', sans-serif;
+drawChart();
+// رویدادهای range, board, date مشابه قبل
+
+// ========== Outage (آنلاین) ==========
+function updateCountdownUIOnline(schedule) {
+  const today = new Date().toISOString().slice(0,10);
+  const sched = schedule[today];
+  const msgEl = document.getElementById('countdown-text');
+  const barEl = document.getElementById('outage-progress');
+  const startEl = document.getElementById('outage-start-time');
+  const endEl = document.getElementById('outage-end-time');
+  const liveIndicator = document.getElementById('live-indicator');
+  const powerStatus = document.getElementById('power-status');
+  const countdownBadge = document.getElementById('outage-countdown');
+
+  if (!sched) {
+    msgEl.textContent = 'No schedule for today';
+    barEl.style.width = '0%';
+    liveIndicator.style.color = '#f00';
+    powerStatus.textContent = '⚡ Power: Unknown';
+    countdownBadge.textContent = '⏳ No data';
+    return;
+  }
+  startEl.textContent = sched.start;
+  endEl.textContent = sched.end;
+  const now = new Date();
+  const start = new Date(today + 'T' + sched.start + ':00');
+  const end = new Date(today + 'T' + sched.end + ':00');
+
+  if (now < start) {
+    const diff = start - now;
+    const hrs = Math.floor(diff/3600000), mins = Math.floor((diff%3600000)/60000), secs = Math.floor((diff%60000)/1000);
+    const msg = `⏳ Power cut in ${hrs}h ${mins}m ${secs}s`;
+    msgEl.textContent = msg;
+    barEl.style.width = '0%';
+    liveIndicator.style.color = '#0f0';
+    powerStatus.textContent = '⚡ Power: On';
+    countdownBadge.textContent = msg;
+  } else if (now < end) {
+    const diff = end - now;
+    const hrs = Math.floor(diff/3600000), mins = Math.floor((diff%3600000)/60000), secs = Math.floor((diff%60000)/1000);
+    const msg = `⚡ Power returns in ${hrs}h ${mins}m ${secs}s`;
+    msgEl.textContent = msg;
+    const startSec = timeToSeconds(sched.start);
+    const endSec = timeToSeconds(sched.end);
+    const nowSec = now.getHours()*3600 + now.getMinutes()*60 + now.getSeconds();
+    const progress = ((nowSec - startSec) / (endSec - startSec)) * 100;
+    barEl.style.width = Math.min(progress, 100) + '%';
+    liveIndicator.style.color = '#f00';
+    powerStatus.textContent = '⚡ Power: Off';
+    countdownBadge.textContent = msg;
+  } else {
+    msgEl.textContent = '✅ Power is on';
+    barEl.style.width = '100%';
+    liveIndicator.style.color = '#0f0';
+    powerStatus.textContent = '⚡ Power: On';
+    countdownBadge.textContent = '✅ Power On';
+  }
 }
 
-* { margin:0; padding:0; box-sizing:border-box; }
-body {
-  font-family: var(--font-body);
-  background: var(--bg);
-  color: var(--text);
-  min-height: 100vh;
-  transition: background var(--transition), color var(--transition);
-  overflow-x: hidden;
-}
+async function loadOutageOnline() {
+  try {
+    const schedule = await fetchOutageOnline();
+    outageSchedule = schedule;
+    const today = new Date().toISOString().slice(0,10);
+    const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
+    const tomorrow = new Date(Date.now()+86400000).toISOString().slice(0,10);
+    const dayafter = new Date(Date.now()+2*86400000).toISOString().slice(0,10);
 
-/* Dynamic background by temperature */
-body.temp-cold { background: linear-gradient(135deg, #0b0f19, #1a2f3a); }
-body.temp-mild { background: linear-gradient(135deg, #12100e, #2d2a24); }
-body.temp-hot  { background: linear-gradient(135deg, #1a0a0a, #3a1a1a); }
+    const updateDay = (date, prefix) => {
+      const elDate = document.getElementById(prefix+'-date');
+      const elTime = document.getElementById(prefix+'-time');
+      if (elDate) elDate.textContent = formatPersianDate(date);
+      if (elTime) {
+        if (schedule[date]) {
+          elTime.textContent = `${schedule[date].start} - ${schedule[date].end}`;
+          elTime.style.color = 'var(--warning)';
+        } else {
+          elTime.textContent = 'No outage';
+          elTime.style.color = 'var(--text)';
+        }
+      }
+    };
+    updateDay(yesterday, 'yesterday');
+    updateDay(today, 'today');
+    updateDay(tomorrow, 'tomorrow');
+    updateDay(dayafter, 'dayafter');
 
-#particle-canvas {
-  position: fixed; top:0; left:0; width:100%; height:100%;
-  z-index: -1;
+    updateCountdownUIOnline(schedule);
+    if (outageTimerOnline) clearInterval(outageTimerOnline);
+    outageTimerOnline = setInterval(() => updateCountdownUIOnline(schedule), 1000);
+  } catch(e) {}
 }
+loadOutageOnline();
 
-/* ========== Glass ========== */
-.glass {
-  background: var(--card-bg);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--border);
-  border-radius: 1.5rem;
-  padding: 1.2rem;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-  transition: all 0.4s;
-  margin-bottom: 1.5rem;
-}
-.glass:hover {
-  border-color: var(--neon-cyan);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 25px var(--neon-cyan);
-}
-
-.container { max-width: 1400px; margin: 1rem auto; padding: 0 1.5rem; }
-
-/* ========== Header ========== */
-.sticky-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 0.8rem 2rem; margin: 1rem auto; max-width: 1400px;
-  position: sticky; top: 1rem; z-index: 100;
-}
-.header-left .neon-text {
-  font-size: 1.8rem;
-  color: var(--neon-pink);
-  text-shadow: 0 0 10px var(--neon-pink);
-  margin:0;
-  font-family: var(--font-heading);
-}
-.header-right { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
-.datetime { font-size: 1rem; color: var(--neon-cyan); font-weight: bold; }
-
-/* ========== Buttons ========== */
-.icon-btn {
-  background: transparent; border: 1px solid var(--border); color: var(--text);
-  padding: 0.4rem 0.8rem; border-radius: 2rem; cursor: pointer;
-  font-size: 1.2rem; transition: all 0.3s;
-}
-.icon-btn:hover { border-color: var(--neon-cyan); box-shadow: 0 0 15px var(--neon-cyan); transform: scale(1.1); }
-.btn {
-  background: linear-gradient(45deg, var(--neon-purple), var(--neon-cyan));
-  border: none; color: #000; padding: 0.6rem 1.5rem; border-radius: 2rem;
-  font-weight: 600; cursor: pointer; transition: transform 0.2s;
-}
-.btn:hover { transform: scale(1.05); }
-.btn-small { padding: 0.4rem 1rem; font-size: 0.9rem; }
-
-/* ========== Status Bar ========== */
-.status-bar {
-  display: flex; justify-content: space-around; gap: 0.8rem; flex-wrap: wrap;
-  padding: 0.8rem; margin-bottom: 1.5rem;
-}
-.badge {
-  padding: 0.3rem 0.8rem;
-  border-radius: 1rem;
-  background: rgba(0,0,0,0.3);
-  border: 1px solid var(--border);
-  font-size: 0.9rem;
-  white-space: nowrap;
-}
-
-/* ========== Node Status ========== */
-.node-status-bar {
-  display: flex; justify-content: center; gap: 3rem; margin-bottom: 2rem;
-}
-.node { display: flex; align-items: center; gap: 0.5rem; }
-.status-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); transition: all 0.3s; }
-.node-status-text { font-size: 0.9rem; font-weight: bold; }
-
-/* ========== Rooms ========== */
-.rooms-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;
-}
-.room-card { position: relative; }
-.room-header { display: flex; justify-content: space-between; align-items: center; }
-.alert-badge { background: var(--red); color: white; padding: 0.2rem 0.6rem; border-radius: 0.5rem; animation: pulse 1s infinite; }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-.room-values { display: flex; justify-content: space-around; margin: 1rem 0; }
-.value-number { font-size: 2.8rem; font-weight: 700; }
-.value-unit { font-size: 1rem; margin-left: 2px; }
-.room-stats { display: flex; justify-content: space-around; font-size: 0.9rem; margin: 0.5rem 0; }
-.stat { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
-.trend { font-weight: bold; text-align: center; margin: 0.5rem 0; }
-
-/* ========== Outage Card ========== */
-.outage-card { margin-top: 2rem; }
-.outage-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
-.outage-live { text-align: center; margin-bottom: 1rem; }
-.live-indicator {
-  font-size: 2rem;
-  color: var(--green);
-  animation: pulse 1.5s infinite;
-}
-.countdown-text {
-  font-size: 1.4rem;
-  font-weight: bold;
-  color: var(--warning);
-  margin-bottom: 0.5rem;
-  min-height: 2.5rem;
-}
-.progress-container {
-  width: 100%;
-  height: 24px;
-  background: rgba(0,0,0,0.4);
-  border-radius: 12px;
-  overflow: hidden;
-  margin-bottom: 0.5rem;
-}
-.progress-bar {
-  height: 100%;
-  width: 0%;
-  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-purple));
-  transition: width 0.3s linear;
-  border-radius: 12px;
-}
-.time-range {
-  display: flex;
-  justify-content: space-between;
-  font-size: 1rem;
-  opacity: 0.9;
-}
-.outage-days {
-  display: flex;
-  justify-content: space-around;
-  text-align: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-.outage-day {
-  padding: 1rem;
-  border-radius: 1rem;
-  background: rgba(0,0,0,0.2);
-  flex: 1;
-  min-width: 100px;
-}
-.outage-day.today {
-  border: 2px solid var(--neon-cyan);
-  background: rgba(0,255,255,0.1);
-}
-.day-label { font-weight: bold; display: block; margin-bottom: 0.3rem; }
-.day-date { display: block; margin-bottom: 0.3rem; font-size: 0.9rem; }
-.day-time { font-size: 1.1rem; font-weight: bold; }
-
-/* ========== Chart ========== */
-.chart-section { min-height: 450px; }
-.chart-toolbar {
-  display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;
-}
-.range-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-input[type="date"] {
-  background: rgba(0,0,0,0.4);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 0.4rem;
-  border-radius: 0.5rem;
-}
-
-/* ========== File Manager ========== */
-.file-manager { margin-top: 2rem; }
-.file-toolbar { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
-.glass-input {
-  background: rgba(0,0,0,0.3);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 0.5rem;
-  border-radius: 0.5rem;
-}
-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-th, td { border: 1px solid var(--border); padding: 0.6rem; text-align: center; }
-th { background: rgba(0,0,0,0.3); }
-td button { background: transparent; border: none; color: var(--text); cursor: pointer; font-size: 1.2rem; margin: 0 0.3rem; }
-td button:hover { color: var(--neon-cyan); }
-
-/* ========== Modals ========== */
-.modal {
-  position: fixed; top:0; left:0; width:100%; height:100%;
-  background: rgba(0,0,0,0.7);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 1000;
-}
-.modal-content { max-width: 550px; width: 90%; }
-.modal-close { font-size: 2rem; cursor: pointer; float: right; transition: transform 0.2s; }
-.modal-close:hover { transform: rotate(90deg); }
-.form-group { margin-bottom: 1rem; }
-.form-group label { display: block; margin-bottom: 0.3rem; font-weight: bold; }
-.form-group input[type="date"], .form-group input[type="time"] {
-  background: rgba(0,0,0,0.4);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 0.5rem;
-  border-radius: 0.5rem;
-  width: 100%;
-}
-.hidden { display: none !important; }
-
-/* ========== Responsive ========== */
-@media (max-width: 768px) {
-  .sticky-header { flex-direction: column; gap: 1rem; align-items: stretch; }
-  .header-right { flex-wrap: wrap; justify-content: center; }
-  .rooms-grid, .node-status-bar { flex-direction: column; align-items: center; }
-  .outage-days { flex-direction: column; }
-  .chart-toolbar { flex-direction: column; align-items: stretch; }
-  .range-buttons { justify-content: center; }
-}
+// بقیه موارد (Theme, Lang, Fullscreen, Data Table) مشابه نسخه داخلی است.
+// توجه: دکمه ویرایش قطع برق در نسخه آنلاین وجود ندارد (یا می‌توان آن را مخفی کرد).
