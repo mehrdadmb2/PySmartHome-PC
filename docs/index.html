@@ -1,119 +1,172 @@
 <!DOCTYPE html>
-<html lang="fa" dir="rtl" data-theme="dark">
+<html lang="en" dir="ltr" data-theme="cyberpunk">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>داشبورد آنلاین خانه هوشمند</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
+  <title>SmartHome Monitor | Online</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400;700&family=Share+Tech+Mono&family=Playfair+Display&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <canvas id="particle-canvas"></canvas>
+
   <header class="glass sticky-header">
-    <div class="header-left"><h1 class="neon-text">SmartHome Monitor</h1></div>
+    <div class="header-left">
+      <h1 class="neon-text">SmartHome Monitor</h1>
+    </div>
     <div class="header-right">
       <span class="datetime" id="datetime">--</span>
-      <button id="theme-toggle" class="icon-btn">🌓</button>
-      <button id="retro-toggle" class="icon-btn">🕹️</button>
-      <button id="lang-toggle" class="icon-btn">En</button>
+      <div class="theme-buttons">
+        <button class="icon-btn" data-theme="cyberpunk" title="Cyberpunk">🌆</button>
+        <button class="icon-btn" data-theme="light" title="Light">☀️</button>
+        <button class="icon-btn" data-theme="retro" title="Retro CRT">🕹️</button>
+        <button class="icon-btn" data-theme="forest" title="Forest">🌲</button>
+        <button class="icon-btn" data-theme="ocean" title="Ocean">🌊</button>
+      </div>
+      <button id="lang-toggle" class="icon-btn">فا</button>
       <button id="fullscreen-btn" class="icon-btn">⛶</button>
     </div>
   </header>
 
   <main class="container">
+    <!-- Status bar with badges -->
+    <div class="status-bar glass">
+      <span class="badge" id="power-status">⚡ Power: Unknown</span>
+      <span class="badge" id="next-outage-countdown">Next outage: --</span>
+      <span class="badge" id="last-update-time">Last update: --</span>
+    </div>
+
+    <!-- Node status -->
     <div class="node-status-bar glass">
-      <div class="node"><span class="node-icon">🖥️</span><span class="node-label">هاب</span><span class="status-dot" id="status-hub"></span><span class="node-last-seen" id="hub-last-seen"></span></div>
-      <div class="node"><span class="node-icon">🌡️</span><span class="node-label">S3</span><span class="status-dot" id="status-s3"></span><span class="node-last-seen" id="s3-last-seen"></span></div>
+      <div class="node" id="node-hub">
+        <span class="node-icon">🖥️</span>
+        <span class="node-label">Hub (ESP32)</span>
+        <span class="status-dot"></span>
+        <span class="node-status-text">Online</span>
+      </div>
+      <div class="node" id="node-s3">
+        <span class="node-icon">🌡️</span>
+        <span class="node-label">Sensor S3</span>
+        <span class="status-dot"></span>
+        <span class="node-status-text">Online</span>
+      </div>
     </div>
 
-    <div class="stats-grid">
-      <div class="glass stat-card"><div class="stat-icon">⏱️</div><div class="stat-content"><h3>System Uptime</h3><p id="sys-uptime">--</p></div></div>
-      <div class="glass stat-card"><div class="stat-icon">📡</div><div class="stat-content"><h3>Last Push</h3><p id="last-push-time">--</p></div></div>
-      <div class="glass stat-card"><div class="stat-icon">📊</div><div class="stat-content"><h3>Today Records</h3><p id="total-records">--</p></div></div>
-    </div>
-
+    <!-- Room cards -->
     <div class="rooms-grid">
-      <div class="glass room-card">
-        <div class="room-header"><h3>Room 1 (Hub)</h3><span class="alert-badge hidden" id="alert-room1">⚠️</span></div>
+      <div class="glass room-card" id="room1">
+        <div class="room-header">
+          <h3>Room 1 (Hub)</h3>
+          <span class="alert-badge hidden">⚠️</span>
+        </div>
         <div class="room-values">
-          <div class="value-box"><span class="value-label">Temp</span><span class="value-number" id="t1">--</span><span class="value-unit">°C</span></div>
-          <div class="value-box"><span class="value-label">Hum</span><span class="value-number" id="h1">--</span><span class="value-unit">%</span></div>
+          <div class="value-box temperature">
+            <span class="value-icon">🌡️</span>
+            <span class="value-number" id="t1">--</span><span class="value-unit">°C</span>
+          </div>
+          <div class="value-box humidity">
+            <span class="value-icon">💧</span>
+            <span class="value-number" id="h1">--</span><span class="value-unit">%</span>
+          </div>
         </div>
         <div class="room-stats">
-          <p>Avg: <span id="avg-t1">--</span>°C / <span id="avg-h1">--</span>%</p>
-          <p>Min/Max: <span id="minmax-t1">--</span>°C / <span id="minmax-h1">--</span>%</p>
-          <p>Samples: <span id="count1">--</span></p>
-          <p class="trend" id="trend1"></p>
+          <div class="stat"><span>Avg</span><span id="avg-t1">--</span>°C</div>
+          <div class="stat"><span>Min/Max</span><span id="minmax-t1">--</span>°C</div>
+          <div class="stat"><span>Samples</span><span id="count1">--</span></div>
         </div>
+        <div class="trend" id="trend1"></div>
       </div>
-      <div class="glass room-card">
-        <div class="room-header"><h3>Room 2 (S3)</h3><span class="alert-badge hidden" id="alert-room2">⚠️</span></div>
+
+      <div class="glass room-card" id="room2">
+        <div class="room-header">
+          <h3>Room 2 (S3)</h3>
+          <span class="alert-badge hidden">⚠️</span>
+        </div>
         <div class="room-values">
-          <div class="value-box"><span class="value-label">Temp</span><span class="value-number" id="t2">--</span><span class="value-unit">°C</span></div>
-          <div class="value-box"><span class="value-label">Hum</span><span class="value-number" id="h2">--</span><span class="value-unit">%</span></div>
+          <div class="value-box temperature">
+            <span class="value-icon">🌡️</span>
+            <span class="value-number" id="t2">--</span><span class="value-unit">°C</span>
+          </div>
+          <div class="value-box humidity">
+            <span class="value-icon">💧</span>
+            <span class="value-number" id="h2">--</span><span class="value-unit">%</span>
+          </div>
         </div>
         <div class="room-stats">
-          <p>Avg: <span id="avg-t2">--</span>°C / <span id="avg-h2">--</span>%</p>
-          <p>Min/Max: <span id="minmax-t2">--</span>°C / <span id="minmax-h2">--</span>%</p>
-          <p>Samples: <span id="count2">--</span></p>
-          <p class="trend" id="trend2"></p>
+          <div class="stat"><span>Avg</span><span id="avg-t2">--</span>°C</div>
+          <div class="stat"><span>Min/Max</span><span id="minmax-t2">--</span>°C</div>
+          <div class="stat"><span>Samples</span><span id="count2">--</span></div>
         </div>
+        <div class="trend" id="trend2"></div>
       </div>
     </div>
 
-    <!-- Power Outage Card (no edit button) -->
-    <div class="glass power-outage-card">
-      <h2>⚡ Power Outage Schedule</h2>
+    <!-- Outage card -->
+    <div class="glass outage-card">
+      <div class="outage-header">
+        <h2>⚡ Power Outage</h2>
+      </div>
       <div class="outage-live">
-        <div class="countdown-message" id="countdown-message">Loading...</div>
-        <div class="progress-bar-container">
-          <div class="progress-bar" id="progress-bar"></div>
-          <div class="progress-marker" id="progress-marker">●</div>
+        <div class="live-indicator" id="live-indicator">●</div>
+        <div class="countdown-text" id="countdown-text">Loading...</div>
+        <div class="progress-container">
+          <div class="progress-bar" id="outage-progress"></div>
         </div>
-        <div class="time-labels">
-          <span class="time-start" id="time-start">09:00</span>
-          <span class="time-end" id="time-end">11:00</span>
+        <div class="time-range">
+          <span id="outage-start-time">--:--</span>
+          <span id="outage-end-time">--:--</span>
         </div>
       </div>
       <div class="outage-days">
-        <div class="outage-day"><span class="day-label">Yesterday</span><span class="day-date" id="yesterday-date"></span><span class="day-time" id="yesterday-time">Unknown</span></div>
-        <div class="outage-day today"><span class="day-label">Today</span><span class="day-date" id="today-date"></span><span class="day-time" id="today-time">Unknown</span></div>
-        <div class="outage-day"><span class="day-label">Tomorrow</span><span class="day-date" id="tomorrow-date"></span><span class="day-time" id="tomorrow-time">Unknown</span></div>
+        <div class="outage-day">
+          <span class="day-label">Yesterday</span>
+          <span class="day-date" id="yesterday-date"></span>
+          <span class="day-time" id="yesterday-time">--</span>
+        </div>
+        <div class="outage-day today">
+          <span class="day-label">Today</span>
+          <span class="day-date" id="today-date"></span>
+          <span class="day-time" id="today-time">--</span>
+        </div>
+        <div class="outage-day">
+          <span class="day-label">Tomorrow</span>
+          <span class="day-date" id="tomorrow-date"></span>
+          <span class="day-time" id="tomorrow-time">--</span>
+        </div>
       </div>
     </div>
 
-    <div class="chart-controls glass">
-      <div class="control-group">
-        <label for="board-select">Sensor:</label>
+    <!-- Chart controls & chart -->
+    <div class="chart-section glass">
+      <div class="chart-toolbar">
         <select id="board-select">
           <option value="esp32_1">Room 1</option>
           <option value="esp32_s3">Room 2</option>
           <option value="combined">Combined</option>
         </select>
+        <div class="range-buttons">
+          <button class="btn btn-small range-btn" data-range="daily">Today</button>
+          <button class="btn btn-small range-btn" data-range="yesterday">Yesterday</button>
+          <button class="btn btn-small range-btn" data-range="weekly">Week</button>
+          <button class="btn btn-small range-btn" data-range="monthly">Month</button>
+          <input type="date" id="chart-date">
+        </div>
+        <button class="btn btn-small" id="view-table-btn">📋 Data Table</button>
       </div>
-      <div class="control-group">
-        <label>Range:</label>
-        <button class="btn btn-small range-btn" data-range="daily">Today</button>
-        <button class="btn btn-small range-btn" data-range="yesterday">Yesterday</button>
-        <button class="btn btn-small range-btn" data-range="weekly">Week</button>
-        <button class="btn btn-small range-btn" data-range="monthly">Month</button>
-        <input type="date" class="date-picker" id="chart-date">
-      </div>
-      <div class="control-group">
-        <button class="btn btn-small" id="view-table-btn">📋 View Table</button>
-      </div>
+      <canvas id="mainChart"></canvas>
     </div>
 
-    <div class="glass chart-card"><canvas id="mainChart"></canvas></div>
-
+    <!-- Data Table Modal -->
     <div class="modal hidden" id="data-modal">
       <div class="modal-content glass">
         <span class="modal-close" id="close-modal">&times;</span>
         <h2>Raw Data</h2>
-        <div class="table-container"><table id="data-table"><thead><tr><th>Time</th><th>Temp</th><th>Hum</th></tr></thead><tbody></tbody></table></div>
+        <div class="table-container">
+          <table id="data-table">
+            <thead><tr><th>Time</th><th>Temp</th><th>Hum</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
         <button class="btn" id="export-modal-csv">📥 Download CSV</button>
       </div>
     </div>
