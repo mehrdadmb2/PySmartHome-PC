@@ -25,8 +25,6 @@
   --neon-cyan: #0077ff;
   --neon-pink: #c300ff;
   --neon-purple: #8a2be2;
-  --font-body: 'Roboto', sans-serif;
-  --font-heading: 'Orbitron', sans-serif;
 }
 [data-theme="retro"] {
   --bg: #000;
@@ -58,8 +56,6 @@
   --neon-cyan: #00ffff;
   --neon-pink: #ff69b4;
   --neon-purple: #7b68ee;
-  --font-body: 'Roboto', sans-serif;
-  --font-heading: 'Orbitron', sans-serif;
 }
 [data-theme="matrix"] {
   --bg: #000;
@@ -94,6 +90,28 @@
   --font-body: 'Rajdhani', sans-serif;
   --font-heading: 'Rajdhani', sans-serif;
 }
+[data-theme="midnight"] {
+  --bg: #0a0a1a;
+  --card-bg: rgba(5,5,20,0.8);
+  --border: #4a4a8a;
+  --text: #c8c8f0;
+  --neon-cyan: #6666ff;
+  --neon-pink: #aa66ff;
+  --neon-purple: #8844dd;
+  --font-body: 'Roboto', sans-serif;
+  --font-heading: 'Orbitron', sans-serif;
+}
+[data-theme="candy"] {
+  --bg: #1a0a1a;
+  --card-bg: rgba(40,10,30,0.7);
+  --border: #ff66aa;
+  --text: #ffddee;
+  --neon-cyan: #ff88cc;
+  --neon-pink: #ff44aa;
+  --neon-purple: #cc66ff;
+  --font-body: 'Poppins', sans-serif;
+  --font-heading: 'Poppins', sans-serif;
+}
 
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
@@ -105,7 +123,6 @@ body {
   overflow-x: hidden;
 }
 
-/* Dynamic background by temperature */
 body.temp-cold { background: linear-gradient(135deg, #0b0f19, #1a2f3a); }
 body.temp-mild { background: linear-gradient(135deg, #12100e, #2d2a24); }
 body.temp-hot  { background: linear-gradient(135deg, #1a0a0a, #3a1a1a); }
@@ -147,14 +164,14 @@ body.temp-hot  { background: linear-gradient(135deg, #1a0a0a, #3a1a1a); }
   margin:0;
   font-family: var(--font-heading);
 }
-.header-right { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+.header-right { display: flex; gap: 0.8rem; align-items: center; flex-wrap: wrap; }
 .datetime { font-size: 1rem; color: var(--neon-cyan); font-weight: bold; }
 
 /* ========== Buttons ========== */
 .icon-btn {
   background: transparent; border: 1px solid var(--border); color: var(--text);
-  padding: 0.4rem 0.8rem; border-radius: 2rem; cursor: pointer;
-  font-size: 1.2rem; transition: all 0.3s;
+  padding: 0.3rem 0.6rem; border-radius: 2rem; cursor: pointer;
+  font-size: 1.1rem; transition: all 0.3s;
 }
 .icon-btn:hover { border-color: var(--neon-cyan); box-shadow: 0 0 15px var(--neon-cyan); transform: scale(1.1); }
 .btn {
