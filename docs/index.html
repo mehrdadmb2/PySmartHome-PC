@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SmartHome Monitor | Online</title>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400;700&family=Share+Tech+Mono&family=Playfair+Display&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400;700&family=Share+Tech+Mono&family=Playfair+Display&family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -29,7 +29,7 @@
   </header>
 
   <main class="container">
-    <!-- Status bar with badges -->
+    <!-- Status bar -->
     <div class="status-bar glass">
       <span class="badge" id="power-status">⚡ Power: Unknown</span>
       <span class="badge" id="next-outage-countdown">Next outage: --</span>
@@ -52,7 +52,7 @@
       </div>
     </div>
 
-    <!-- Room cards -->
+    <!-- Room cards (same as internal, without CSV export button) -->
     <div class="rooms-grid">
       <div class="glass room-card" id="room1">
         <div class="room-header">
@@ -101,7 +101,7 @@
       </div>
     </div>
 
-    <!-- Outage card -->
+    <!-- Outage card (no edit button) -->
     <div class="glass outage-card">
       <div class="outage-header">
         <h2>⚡ Power Outage</h2>
