@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en" dir="ltr" data-theme="midnight">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07111f">
+  <meta name="description" content="PySmartHome-PC real-time home IoT monitoring dashboard">
+  <title>PySmartHome • Smart Home Control Center</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Background is auto-inserted by bg.js -->
+
+  <header class="topbar">
+    <div class="brand-block">
+      <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div>
+        <div class="eyebrow">HOME IOT / PYSMARTHOME-PC</div>
+        <h1>Smart Home Control Center</h1>
+      </div>
+    </div>
+    <div class="topbar-tools">
+      <div class="connection-pill" id="connection-pill"><span class="pulse-dot"></span><span id="connection-text">Detecting connection…</span></div>
+      <div class="clock-block">
+        <strong id="iran-clock">--:--:--</strong>
+        <span id="iran-date">----</span>
+      </div>
+      <button class="icon-button" id="theme-toggle" type="button" title="Toggle theme" aria-label="Toggle theme">☼</button>
+      <button class="icon-button" id="fullscreen-btn" type="button" title="Fullscreen" aria-label="Fullscreen">⛶</button>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="hero-grid">
+      <div class="hero-card glass-panel">
+        <div class="hero-copy">
+          <div class="status-label"><span class="pulse-dot"></span><span id="system-status">SYSTEM INITIALIZING</span></div>
+          <h2>Your home, <span>measured.</span><br>Your data, <span>under control.</span></h2>
+          <p>Monitor ESP32 nodes, track room conditions, inspect historical trends, and follow the next scheduled power outage from one responsive control center.</p>
+        </div>
+        <div class="hero-metrics">
+          <div class="hero-metric"><span>UPTIME</span><strong id="hero-uptime">--</strong></div>
+          <div class="hero-metric"><span>LAST POLL</span><strong id="hero-poll">--</strong></div>
+          <div class="hero-metric"><span>SYNC</span><strong id="hero-sync">--</strong></div>
+          <div class="hero-metric"><span>SAMPLES</span><strong id="hero-samples">--</strong></div>
+        </div>
+      </div>
+
+      <div class="quick-status glass-panel">
+        <div class="section-heading compact"><div><span class="eyebrow">SYSTEM HEALTH</span><h3>Live diagnostics</h3></div><span class="health-orb" id="health-orb"></span></div>
+        <div class="health-grid">
+          <div class="health-item"><span class="mini-icon violet">◉</span><div><small>Power state</small><strong id="health-power">--</strong></div></div>
+          <div class="health-item"><span class="mini-icon cyan">↻</span><div><small>Worker</small><strong id="health-worker">--</strong></div></div>
+          <div class="health-item"><span class="mini-icon green">✓</span><div><small>GitHub sync</small><strong id="health-github">--</strong></div></div>
+          <div class="health-item"><span class="mini-icon amber">⌁</span><div><small>Alert limit</small><strong id="health-threshold">35 °C</strong></div></div>
+        </div>
+        <div class="system-note" id="system-note">Waiting for live telemetry…</div>
+      </div>
+    </section>
+
+    <section class="section-block">
+      <div class="section-heading"><div><span class="eyebrow">ROOM TELEMETRY</span><h3>Live environment</h3></div><span class="section-badge" id="telemetry-refresh">AUTO • 8s</span></div>
+      <div class="room-grid">
+        <article class="room-card glass-panel" id="room-esp32_1">
+          <div class="room-topline"><div class="room-title"><div class="node-logo purple"><span>⌂</span></div><div><span class="room-kicker">NODE 01</span><h4>Room 1 <em>• Hub</em></h4></div></div><div class="node-state"><span class="status-dot"></span><span class="node-state-text">OFFLINE</span></div></div>
+          <div class="room-values">
+            <div class="big-reading temperature"><span class="reading-icon">◌</span><div><strong id="temp-esp32_1">--</strong><span>°C</span><small>temperature</small></div></div>
+            <div class="big-reading humidity"><span class="reading-icon">≈</span><div><strong id="hum-esp32_1">--</strong><span>%</span><small>humidity</small></div></div>
+          </div>
+          <div class="metric-strip">
+            <div><span>MIN / MAX</span><strong id="range-esp32_1">--</strong></div>
+            <div><span>AVG</span><strong id="avg-esp32_1">--</strong></div>
+            <div><span>LATENCY</span><strong id="latency-esp32_1">--</strong></div>
+            <div><span>SAMPLES</span><strong id="samples-esp32_1">--</strong></div>
+          </div>
+          <div class="room-footer"><span id="updated-esp32_1">No successful sample yet</span><span class="alert-tag hidden" id="alert-esp32_1">HOT</span></div>
+        </article>
+
+        <article class="room-card glass-panel" id="room-esp32_s3">
+          <div class="room-topline"><div class="room-title"><div class="node-logo cyan"><span>⌁</span></div><div><span class="room-kicker">NODE 02</span><h4>Room 2 <em>• Sensor S3</em></h4></div></div><div class="node-state"><span class="status-dot"></span><span class="node-state-text">OFFLINE</span></div></div>
+          <div class="room-values">
+            <div class="big-reading temperature"><span class="reading-icon">◌</span><div><strong id="temp-esp32_s3">--</strong><span>°C</span><small>temperature</small></div></div>
+            <div class="big-reading humidity"><span class="reading-icon">≈</span><div><strong id="hum-esp32_s3">--</strong><span>%</span><small>humidity</small></div></div>
+          </div>
+          <div class="metric-strip">
+            <div><span>MIN / MAX</span><strong id="range-esp32_s3">--</strong></div>
+            <div><span>AVG</span><strong id="avg-esp32_s3">--</strong></div>
+            <div><span>LATENCY</span><strong id="latency-esp32_s3">--</strong></div>
+            <div><span>SAMPLES</span><strong id="samples-esp32_s3">--</strong></div>
+          </div>
+          <div class="room-footer"><span id="updated-esp32_s3">No successful sample yet</span><span class="alert-tag hidden" id="alert-esp32_s3">HOT</span></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="dashboard-grid">
+      <div class="chart-panel glass-panel">
+        <div class="section-heading chart-heading"><div><span class="eyebrow">HISTORY / ANALYTICS</span><h3>Environmental trends</h3></div><div class="chart-summary" id="chart-summary">No data loaded</div></div>
+        <div class="chart-controls">
+          <div class="control-group">
+            <label for="board-select">Node</label>
+            <select id="board-select"><option value="esp32_1">Room 1 • Hub</option><option value="esp32_s3">Room 2 • Sensor S3</option><option value="combined">Combined view</option></select>
+          </div>
+          <div class="control-group grow"><label>Range</label><div class="segmented" id="range-buttons"><button class="active" data-range="daily">Today</button><button data-range="yesterday">Yesterday</button><button data-range="weekly">7 Days</button><button data-range="monthly">30 Days</button></div></div>
+          <div class="control-group date-control"><label for="chart-date">Reference date</label><input type="date" id="chart-date"></div>
+          <button class="outline-button" id="reset-zoom" type="button">↺ Reset</button>
+          <button class="primary-button" id="export-chart-btn" type="button">↓ Export CSV</button>
+        </div>
+        <div class="chart-wrap"><canvas id="main-chart"></canvas><div class="chart-empty hidden" id="chart-empty"><div class="empty-icon">⌁</div><strong>No samples for this range</strong><span>Try another date or wait for the next sensor poll.</span></div></div>
+      </div>
+
+      <aside class="insight-panel glass-panel">
+        <div class="section-heading compact"><div><span class="eyebrow">SMART INSIGHTS</span><h3>What is happening?</h3></div></div>
+        <div class="insight-list">
+          <div class="insight-card"><span class="insight-icon purple">↗</span><div><small>Temperature trend</small><strong id="insight-temp">--</strong><p id="insight-temp-note">Waiting for enough samples.</p></div></div>
+          <div class="insight-card"><span class="insight-icon cyan">≈</span><div><small>Humidity trend</small><strong id="insight-hum">--</strong><p id="insight-hum-note">Waiting for enough samples.</p></div></div>
+          <div class="insight-card"><span class="insight-icon amber">⚠</span><div><small>Attention</small><strong id="insight-alert">All clear</strong><p id="insight-alert-note">No temperature alert is currently active.</p></div></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="outage-panel glass-panel">
+      <div class="section-heading"><div><span class="eyebrow">POWER PLANNING</span><h3>Scheduled power outage</h3><p class="heading-note">2-hour rolling cycle • Friday normally skipped • schedule shown in Iran time</p></div><button class="outline-button" id="edit-outage-btn" type="button">✎ Edit schedule</button></div>
+      <div class="outage-live-grid">
+        <div class="outage-main">
+          <div class="power-state-row"><div class="power-state" id="power-state"><span class="power-dot"></span><strong>Checking…</strong></div><span class="countdown-label" id="countdown-label">--</span></div>
+          <div class="countdown" id="outage-countdown">--:--:--</div>
+          <p class="countdown-sub" id="outage-message">Loading today's schedule…</p>
+          <div class="progress-track"><span id="outage-progress"></span></div>
+          <div class="outage-times"><div><small>OUTAGE START</small><strong id="outage-start-time">--:--</strong></div><div><small>OUTAGE END</small><strong id="outage-end-time">--:--</strong></div><div><small>NEXT OUTAGE</small><strong id="next-outage-time">--</strong></div></div>
+        </div>
+        <div class="cycle-card">
+          <div class="cycle-orbit">
+            <div class="orbit-ring"></div>
+            <div class="orbit-ring"></div>
+            <div class="orbit-ring"></div>
+            <div class="orbit-dot"></div>
+            <div class="orbit-dot"></div>
+            <div class="orbit-dot"></div>
+            <div class="orbit-center"><strong>2H</strong></div>
+          </div>
+          <div><span class="eyebrow">CYCLE RULE</span><h4>Rolling 2-hour slots</h4><p>09–11 → 11–13 → 13–15 → 15–17 → 17–19 → 19–21 → back to 09–11.</p><p>Friday does not consume a slot.</p></div>
+        </div>
+      </div>
+      <div class="outage-days" id="outage-days">
+        <div class="outage-day"><span class="day-label">Yesterday</span><strong id="yesterday-date">--</strong><b id="yesterday-outage">--</b></div>
+        <div class="outage-day today"><span class="day-label">Today</span><strong id="today-date">--</strong><b id="today-outage">--</b></div>
+        <div class="outage-day"><span class="day-label">Tomorrow</span><strong id="tomorrow-date">--</strong><b id="tomorrow-outage">--</b></div>
+      </div>
+      <div class="reference-banner"><span class="mini-icon violet">◎</span><div><small>ACTIVE CYCLE REFERENCE</small><strong id="reference-banner">Today • 13:00–15:00</strong></div><span class="reference-note">Edit the reference and the entire cycle recalculates.</span></div>
+    </section>
+
+    <section class="data-panel glass-panel">
+      <div class="section-heading"><div><span class="eyebrow">RAW TELEMETRY</span><h3>Recent measurements</h3></div><button class="outline-button" id="view-table-btn" type="button">▤ View table</button></div>
+      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Time</th><th>Node</th><th>Temperature</th><th>Humidity</th></tr></thead><tbody id="data-table-body"></tbody></table><div class="table-empty hidden" id="table-empty">No measurements for this selection.</div></div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><span>PySmartHome-PC</span><span>•</span><span>Iran Time • Asia/Tehran • UTC+03:30</span><span>•</span><span id="footer-status">Ready</span></footer>
+
+  <div class="toast-stack" id="toast-stack"></div>
+
+  <dialog class="modal" id="outage-modal">
+    <div class="modal-card glass-panel">
+      <button class="modal-close" id="close-outage-modal" type="button">×</button>
+      <div class="eyebrow">OUTAGE CYCLE EDITOR</div><h3>Edit outage reference</h3>
+      <p class="modal-note">Choose a reference day and an exact 2-hour slot between 09:00 and 21:00. The rolling cycle is regenerated around it, while Friday remains skipped.</p>
+      <label>Date<input type="date" id="outage-date"></label>
+      <label>Start time<select id="outage-start"><option value="09:00">09:00</option><option value="11:00">11:00</option><option value="13:00">13:00</option><option value="15:00">15:00</option><option value="17:00">17:00</option><option value="19:00">19:00</option></select></label>
+      <label>End time<input type="time" id="outage-end" readonly></label>
+      <div class="modal-preview"><span>New reference</span><strong id="outage-preview">--</strong></div>
+      <div class="modal-actions"><button class="outline-button" id="cancel-outage" type="button">Cancel</button><button class="primary-button" id="save-outage" type="button">Apply & recalculate</button></div>
+    </div>
+  </dialog>
+
+  <dialog class="modal" id="data-modal">
+    <div class="modal-card glass-panel wide-modal"><button class="modal-close" id="close-data-modal" type="button">×</button><div class="eyebrow">DATA INSPECTOR</div><h3>Measurement table</h3><div class="table-wrap modal-table"><table><thead><tr><th>Date</th><th>Time</th><th>Node</th><th>Temperature</th><th>Humidity</th></tr></thead><tbody id="modal-table-body"></tbody></table></div></div>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
+  <script src="bg.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
