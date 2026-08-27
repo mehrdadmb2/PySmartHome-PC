@@ -4,8 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SmartHome Monitor | Internal</title>
-  <!-- Fonts for themes -->
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400;700&family=Share+Tech+Mono&family=Playfair+Display&family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400;700&family=Share+Tech+Mono&family=Playfair+Display&family=Poppins:wght@300;400;600&family=Rajdhani:wght@400;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -13,7 +12,7 @@
 
   <header class="glass sticky-header">
     <div class="header-left">
-      <h1 class="neon-text">SmartHome Monitor</h1>
+      <h1 class="neon-text">🏠 SmartHome Monitor</h1>
     </div>
     <div class="header-right">
       <span class="datetime" id="datetime">--</span>
@@ -23,6 +22,9 @@
         <button class="icon-btn" data-theme="retro" title="Retro CRT">🕹️</button>
         <button class="icon-btn" data-theme="forest" title="Forest">🌲</button>
         <button class="icon-btn" data-theme="ocean" title="Ocean">🌊</button>
+        <button class="icon-btn" data-theme="matrix" title="Matrix">💚</button>
+        <button class="icon-btn" data-theme="sunset" title="Sunset">🌅</button>
+        <button class="icon-btn" data-theme="aurora" title="Aurora">🌌</button>
       </div>
       <button id="lang-toggle" class="icon-btn">فا</button>
       <button id="fullscreen-btn" class="icon-btn">⛶</button>
@@ -30,14 +32,16 @@
   </header>
 
   <main class="container">
-    <!-- Status bar -->
+    <!-- Status Bar -->
     <div class="status-bar glass">
       <span class="badge" id="power-status">⚡ Power: Unknown</span>
-      <span class="badge" id="next-outage-countdown">Next outage: --</span>
-      <span class="badge" id="last-update-time">Last update: --</span>
+      <span class="badge" id="outage-countdown">⏳ Next: --</span>
+      <span class="badge" id="last-update-time">🔄 Last update: --</span>
+      <span class="badge" id="sys-uptime">⏱️ Uptime: --</span>
+      <span class="badge" id="total-records">📊 Records: --</span>
     </div>
 
-    <!-- Node status -->
+    <!-- Node Status -->
     <div class="node-status-bar glass">
       <div class="node" id="node-hub">
         <span class="node-icon">🖥️</span>
@@ -53,11 +57,11 @@
       </div>
     </div>
 
-    <!-- Room cards -->
+    <!-- Room Cards -->
     <div class="rooms-grid">
       <div class="glass room-card" id="room1">
         <div class="room-header">
-          <h3>Room 1 (Hub)</h3>
+          <h3>🛋️ Room 1 (Hub)</h3>
           <span class="alert-badge hidden">⚠️</span>
         </div>
         <div class="room-values">
@@ -71,9 +75,9 @@
           </div>
         </div>
         <div class="room-stats">
-          <div class="stat"><span>Avg</span><span id="avg-t1">--</span>°C</div>
-          <div class="stat"><span>Min/Max</span><span id="minmax-t1">--</span>°C</div>
-          <div class="stat"><span>Samples</span><span id="count1">--</span></div>
+          <div class="stat"><span>📈 Avg</span><span id="avg-t1">--</span>°C</div>
+          <div class="stat"><span>📉 Min/Max</span><span id="minmax-t1">--</span>°C</div>
+          <div class="stat"><span>📊 Samples</span><span id="count1">--</span></div>
         </div>
         <div class="trend" id="trend1"></div>
         <button class="btn export-btn" data-board="esp32_1">📥 CSV</button>
@@ -81,7 +85,7 @@
 
       <div class="glass room-card" id="room2">
         <div class="room-header">
-          <h3>Room 2 (S3)</h3>
+          <h3>🛏️ Room 2 (S3)</h3>
           <span class="alert-badge hidden">⚠️</span>
         </div>
         <div class="room-values">
@@ -95,19 +99,19 @@
           </div>
         </div>
         <div class="room-stats">
-          <div class="stat"><span>Avg</span><span id="avg-t2">--</span>°C</div>
-          <div class="stat"><span>Min/Max</span><span id="minmax-t2">--</span>°C</div>
-          <div class="stat"><span>Samples</span><span id="count2">--</span></div>
+          <div class="stat"><span>📈 Avg</span><span id="avg-t2">--</span>°C</div>
+          <div class="stat"><span>📉 Min/Max</span><span id="minmax-t2">--</span>°C</div>
+          <div class="stat"><span>📊 Samples</span><span id="count2">--</span></div>
         </div>
         <div class="trend" id="trend2"></div>
         <button class="btn export-btn" data-board="esp32_s3">📥 CSV</button>
       </div>
     </div>
 
-    <!-- Outage card -->
+    <!-- Outage Card (کاملاً بازطراحی شده) -->
     <div class="glass outage-card">
       <div class="outage-header">
-        <h2>⚡ Power Outage</h2>
+        <h2>⚡ Power Outage Schedule</h2>
         <button id="edit-outage-btn" class="btn btn-small">✏️ Edit</button>
       </div>
       <div class="outage-live">
@@ -123,30 +127,35 @@
       </div>
       <div class="outage-days">
         <div class="outage-day">
-          <span class="day-label">Yesterday</span>
+          <span class="day-label">📅 Yesterday</span>
           <span class="day-date" id="yesterday-date"></span>
           <span class="day-time" id="yesterday-time">--</span>
         </div>
         <div class="outage-day today">
-          <span class="day-label">Today</span>
+          <span class="day-label">📅 Today</span>
           <span class="day-date" id="today-date"></span>
           <span class="day-time" id="today-time">--</span>
         </div>
         <div class="outage-day">
-          <span class="day-label">Tomorrow</span>
+          <span class="day-label">📅 Tomorrow</span>
           <span class="day-date" id="tomorrow-date"></span>
           <span class="day-time" id="tomorrow-time">--</span>
+        </div>
+        <div class="outage-day">
+          <span class="day-label">📅 Day after</span>
+          <span class="day-date" id="dayafter-date"></span>
+          <span class="day-time" id="dayafter-time">--</span>
         </div>
       </div>
     </div>
 
-    <!-- Chart controls & chart -->
+    <!-- Chart Section -->
     <div class="chart-section glass">
       <div class="chart-toolbar">
         <select id="board-select">
-          <option value="esp32_1">Room 1</option>
-          <option value="esp32_s3">Room 2</option>
-          <option value="combined">Combined</option>
+          <option value="esp32_1">🛋️ Room 1</option>
+          <option value="esp32_s3">🛏️ Room 2</option>
+          <option value="combined">🔀 Combined</option>
         </select>
         <div class="range-buttons">
           <button class="btn btn-small range-btn" data-range="daily">Today</button>
@@ -160,7 +169,7 @@
       <canvas id="mainChart"></canvas>
     </div>
 
-    <!-- File manager (internal only) -->
+    <!-- File Manager -->
     <div class="glass file-manager">
       <h2>📁 File Manager</h2>
       <div class="file-toolbar">
@@ -177,11 +186,11 @@
       </table>
     </div>
 
-    <!-- Data Table Modal -->
+    <!-- Modals -->
     <div class="modal hidden" id="data-modal">
       <div class="modal-content glass">
         <span class="modal-close" id="close-modal">&times;</span>
-        <h2>Raw Data</h2>
+        <h2>📊 Raw Data</h2>
         <div class="table-container">
           <table id="data-table">
             <thead><tr><th>Time</th><th>Temp</th><th>Hum</th></tr></thead>
@@ -192,21 +201,21 @@
       </div>
     </div>
 
-    <!-- Outage Edit Modal -->
     <div class="modal hidden" id="outage-modal">
       <div class="modal-content glass">
         <span class="modal-close" id="close-outage-modal">&times;</span>
-        <h2>Edit Outage</h2>
-        <div class="form-group"><label>Date</label><input type="date" id="outage-date"></div>
-        <div class="form-group"><label>Start</label><input type="time" id="outage-start"></div>
-        <div class="form-group"><label>End</label><input type="time" id="outage-end"></div>
-        <button id="save-outage" class="btn">Save</button>
+        <h2>✏️ Edit Outage</h2>
+        <div class="form-group"><label>📅 Date</label><input type="date" id="outage-date"></div>
+        <div class="form-group"><label>⏰ Start</label><input type="time" id="outage-start"></div>
+        <div class="form-group"><label>⏰ End</label><input type="time" id="outage-end"></div>
+        <button id="save-outage" class="btn">💾 Save</button>
       </div>
     </div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
