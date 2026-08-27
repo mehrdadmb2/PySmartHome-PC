@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SmartHome Monitor | Internal</title>
-  <!-- Fonts for themes -->
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400;700&family=Share+Tech+Mono&family=Playfair+Display&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -78,10 +77,33 @@
         <div class="trend" id="trend1"></div>
         <button class="btn export-btn" data-board="esp32_1">📥 CSV</button>
       </div>
-      <!-- Similar for room 2 -->
+
+      <div class="glass room-card" id="room2">
+        <div class="room-header">
+          <h3>Room 2 (S3)</h3>
+          <span class="alert-badge hidden">⚠️</span>
+        </div>
+        <div class="room-values">
+          <div class="value-box temperature">
+            <span class="value-icon">🌡️</span>
+            <span class="value-number" id="t2">--</span><span class="value-unit">°C</span>
+          </div>
+          <div class="value-box humidity">
+            <span class="value-icon">💧</span>
+            <span class="value-number" id="h2">--</span><span class="value-unit">%</span>
+          </div>
+        </div>
+        <div class="room-stats">
+          <div class="stat"><span>Avg</span><span id="avg-t2">--</span>°C</div>
+          <div class="stat"><span>Min/Max</span><span id="minmax-t2">--</span>°C</div>
+          <div class="stat"><span>Samples</span><span id="count2">--</span></div>
+        </div>
+        <div class="trend" id="trend2"></div>
+        <button class="btn export-btn" data-board="esp32_s3">📥 CSV</button>
+      </div>
     </div>
 
-    <!-- Outage card (beautiful) -->
+    <!-- Outage card -->
     <div class="glass outage-card">
       <div class="outage-header">
         <h2>⚡ Power Outage</h2>
@@ -132,27 +154,55 @@
           <button class="btn btn-small range-btn" data-range="monthly">Month</button>
           <input type="date" id="chart-date">
         </div>
+        <button class="btn btn-small" id="view-table-btn">📋 Data Table</button>
       </div>
       <canvas id="mainChart"></canvas>
     </div>
 
     <!-- File manager (internal only) -->
     <div class="glass file-manager">
-      <!-- same as before -->
+      <h2>📁 File Manager</h2>
+      <div class="file-toolbar">
+        <button id="refresh-files" class="btn btn-small">🔄 Refresh</button>
+        <button id="download-all" class="btn btn-small">⬇️ Download All</button>
+        <label for="upload-input" class="btn btn-small">📤 Upload</label>
+        <input type="file" id="upload-input" multiple style="display:none">
+        <input type="text" id="upload-dir" placeholder="Folder (e.g., /www/)" value="/www/" class="glass-input">
+      </div>
+      <div id="upload-status" class="upload-status"></div>
+      <table id="file-table">
+        <thead><tr><th>File Name</th><th>Size (KB)</th><th>Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Data Table Modal -->
+    <div class="modal hidden" id="data-modal">
+      <div class="modal-content glass">
+        <span class="modal-close" id="close-modal">&times;</span>
+        <h2>Raw Data</h2>
+        <div class="table-container">
+          <table id="data-table">
+            <thead><tr><th>Time</th><th>Temp</th><th>Hum</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <button class="btn" id="export-modal-csv">📥 Download CSV</button>
+      </div>
+    </div>
+
+    <!-- Outage Edit Modal -->
+    <div class="modal hidden" id="outage-modal">
+      <div class="modal-content glass">
+        <span class="modal-close" id="close-outage-modal">&times;</span>
+        <h2>Edit Outage</h2>
+        <div class="form-group"><label>Date</label><input type="date" id="outage-date"></div>
+        <div class="form-group"><label>Start</label><input type="time" id="outage-start"></div>
+        <div class="form-group"><label>End</label><input type="time" id="outage-end"></div>
+        <button id="save-outage" class="btn">Save</button>
+      </div>
     </div>
   </main>
-
-  <!-- Modals -->
-  <div class="modal hidden" id="outage-modal">
-    <div class="modal-content glass">
-      <span class="modal-close" id="close-outage-modal">&times;</span>
-      <h2>Edit Outage</h2>
-      <div class="form-group"><label>Date</label><input type="date" id="outage-date"></div>
-      <div class="form-group"><label>Start</label><input type="time" id="outage-start"></div>
-      <div class="form-group"><label>End</label><input type="time" id="outage-end"></div>
-      <button id="save-outage" class="btn">Save</button>
-    </div>
-  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
