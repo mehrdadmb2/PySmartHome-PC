@@ -1,6 +1,6 @@
 const API = window.location.origin;
 const TEMP_THRESHOLD = 35;
-const MODE = 'internal'; // یا 'online' برای نسخه آنلاین
+const PARTICLE_COUNT = 60; // reduced for performance
 
 let lang = localStorage.getItem('lang') || 'en';
 let theme = localStorage.getItem('theme') || 'cyberpunk';
@@ -16,7 +16,7 @@ document.documentElement.lang = lang;
 document.dir = lang === 'fa' ? 'rtl' : 'ltr';
 updateDateTime(); setInterval(updateDateTime, 1000);
 
-// ========== Particles ==========
+// ========== Particles (lightweight) ==========
 function initParticles() {
   const canvas = document.getElementById('particle-canvas');
   const ctx = canvas.getContext('2d');
@@ -24,21 +24,41 @@ function initParticles() {
   function resize() { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; }
   window.addEventListener('resize', resize); resize();
   class Particle {
-    constructor() { this.x = Math.random()*width; this.y = Math.random()*height; this.vx = (Math.random()-0.5)*0.5; this.vy = (Math.random()-0.5)*0.5; this.size = Math.random()*2+1; }
-    update() { this.x += this.vx; this.y += this.vy; if(this.x<0||this.x>width) this.vx*=-1; if(this.y<0||this.y>height) this.vy*=-1; }
-    draw() { ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.fillStyle = 'rgba(0,255,255,0.4)'; ctx.fill(); }
+    constructor() { 
+      this.x = Math.random()*width; 
+      this.y = Math.random()*height; 
+      this.vx = (Math.random()-0.5)*0.3; 
+      this.vy = (Math.random()-0.5)*0.3; 
+      this.size = Math.random()*1.5 + 0.5;
+    }
+    update() { 
+      this.x += this.vx; 
+      this.y += this.vy; 
+      if(this.x<0||this.x>width) this.vx*=-1; 
+      if(this.y<0||this.y>height) this.vy*=-1; 
+    }
+    draw() { 
+      ctx.beginPath(); 
+      ctx.arc(this.x,this.y,this.size,0,Math.PI*2); 
+      ctx.fillStyle = 'rgba(0,255,255,0.3)'; 
+      ctx.fill(); 
+    }
   }
-  for(let i=0;i<100;i++) particles.push(new Particle());
+  for(let i=0;i<PARTICLE_COUNT;i++) particles.push(new Particle());
   function animate() {
     ctx.clearRect(0,0,width,height);
     particles.forEach(p => { p.update(); p.draw(); });
+    // lines between close particles (optimized)
     for(let i=0;i<particles.length;i++) {
       for(let j=i+1;j<particles.length;j++) {
         const dx = particles[i].x - particles[j].x, dy = particles[i].y - particles[j].y;
         const dist = Math.sqrt(dx*dx+dy*dy);
-        if(dist < 120) {
-          ctx.beginPath(); ctx.moveTo(particles[i].x, particles[i].y); ctx.lineTo(particles[j].x, particles[j].y);
-          ctx.strokeStyle = `rgba(0,255,255,${0.3*(1 - dist/120)})`; ctx.stroke();
+        if(dist < 100) {
+          ctx.beginPath(); 
+          ctx.moveTo(particles[i].x, particles[i].y); 
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.strokeStyle = `rgba(0,255,255,${0.2*(1 - dist/100)})`; 
+          ctx.stroke();
         }
       }
     }
@@ -125,7 +145,6 @@ async function updateDashboard() {
       }
     }
   }
-  // Uptime & records
   try {
     const hubData = await fetchDataRange('esp32_1', 'daily', today);
     if (hubData.length) {
@@ -137,6 +156,7 @@ async function updateDashboard() {
     }
   } catch(e) {}
 }
+// Update every 30 seconds to reduce load
 setInterval(updateDashboard, 30000);
 updateDashboard();
 
@@ -159,18 +179,25 @@ async function drawChart() {
       data: {
         labels,
         datasets: [
-          { label: 'Room1 Temp', data: data1.map(d=>d.temp), borderColor:'#ff6ec7', yAxisID:'y', pointRadius:0, tension:0.3 },
-          { label: 'Room2 Temp', data: data2.map(d=>d.temp), borderColor:'#ff9900', yAxisID:'y', pointRadius:0, tension:0.3 },
-          { label: 'Room1 Hum', data: data1.map(d=>d.humidity), borderColor:'#0ff', yAxisID:'y1', pointRadius:0, tension:0.3 },
-          { label: 'Room2 Hum', data: data2.map(d=>d.humidity), borderColor:'#00ff99', yAxisID:'y1', pointRadius:0, tension:0.3 }
+          { label: 'Room1 Temp', data: data1.map(d=>d.temp), borderColor:'#ff6ec7', yAxisID:'y', pointRadius:0, tension:0.3, borderWidth:2 },
+          { label: 'Room2 Temp', data: data2.map(d=>d.temp), borderColor:'#ff9900', yAxisID:'y', pointRadius:0, tension:0.3, borderWidth:2 },
+          { label: 'Room1 Hum', data: data1.map(d=>d.humidity), borderColor:'#0ff', yAxisID:'y1', pointRadius:0, tension:0.3, borderWidth:2 },
+          { label: 'Room2 Hum', data: data2.map(d=>d.humidity), borderColor:'#00ff99', yAxisID:'y1', pointRadius:0, tension:0.3, borderWidth:2 }
         ]
       },
       options: {
-        responsive:true, maintainAspectRatio:false,
-        plugins: { zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } } },
+        responsive: true,
+        maintainAspectRatio: true,
+        aspectRatio: 2,
+        plugins: { 
+          zoom: { 
+            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, 
+            pan: { enabled: true, mode: 'x' } 
+          } 
+        },
         scales: {
-          y: { type:'linear', position:'left', title:{display:true, text:'Temperature (°C)'} },
-          y1: { type:'linear', position:'right', title:{display:true, text:'Humidity (%)'}, grid:{drawOnChartArea:false} }
+          y: { type:'linear', position:'left', title:{display:true, text:'Temp (°C)'} },
+          y1: { type:'linear', position:'right', title:{display:true, text:'Hum (%)'}, grid:{drawOnChartArea:false} }
         }
       }
     });
@@ -182,16 +209,23 @@ async function drawChart() {
       data: {
         labels: data.map(d=>d.time),
         datasets: [
-          { label: 'Temperature', data: data.map(d=>d.temp), borderColor:'#ff6ec7', yAxisID:'y', fill:true, backgroundColor:'rgba(255,110,199,0.1)', pointRadius:0, tension:0.3 },
-          { label: 'Humidity', data: data.map(d=>d.humidity), borderColor:'#0ff', yAxisID:'y1', fill:true, backgroundColor:'rgba(0,255,255,0.1)', pointRadius:0, tension:0.3 }
+          { label: 'Temperature', data: data.map(d=>d.temp), borderColor:'#ff6ec7', yAxisID:'y', fill:true, backgroundColor:'rgba(255,110,199,0.1)', pointRadius:0, tension:0.3, borderWidth:2 },
+          { label: 'Humidity', data: data.map(d=>d.humidity), borderColor:'#0ff', yAxisID:'y1', fill:true, backgroundColor:'rgba(0,255,255,0.1)', pointRadius:0, tension:0.3, borderWidth:2 }
         ]
       },
       options: {
-        responsive:true, maintainAspectRatio:false,
-        plugins: { zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } } },
+        responsive: true,
+        maintainAspectRatio: true,
+        aspectRatio: 2,
+        plugins: { 
+          zoom: { 
+            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, 
+            pan: { enabled: true, mode: 'x' } 
+          } 
+        },
         scales: {
-          y: { type:'linear', position:'left', title:{display:true, text:'Temperature (°C)'} },
-          y1: { type:'linear', position:'right', title:{display:true, text:'Humidity (%)'}, grid:{drawOnChartArea:false} }
+          y: { type:'linear', position:'left', title:{display:true, text:'Temp (°C)'} },
+          y1: { type:'linear', position:'right', title:{display:true, text:'Hum (%)'}, grid:{drawOnChartArea:false} }
         }
       }
     });
@@ -221,10 +255,10 @@ function updateCountdownUI(data) {
   }
 
   if (data.status === 'no_data') {
-    msgEl.textContent = '❌ No schedule for today';
+    msgEl.textContent = '❌ No schedule today';
     barEl.style.width = '0%';
     liveIndicator.style.color = '#f00';
-    powerStatus.textContent = '⚡ Power: Unknown';
+    powerStatus.textContent = '⚡ Unknown';
     countdownBadge.textContent = '⏳ No data';
     return;
   }
@@ -233,7 +267,7 @@ function updateCountdownUI(data) {
     msgEl.textContent = data.message;
     barEl.style.width = '0%';
     liveIndicator.style.color = '#0f0';
-    powerStatus.textContent = '⚡ Power: On';
+    powerStatus.textContent = '⚡ Power On';
     countdownBadge.textContent = `⏳ ${data.message}`;
   } else if (data.status === 'during') {
     msgEl.textContent = data.message;
@@ -243,13 +277,13 @@ function updateCountdownUI(data) {
     const progress = ((nowSec - startSec) / (endSec - startSec)) * 100;
     barEl.style.width = Math.min(progress, 100) + '%';
     liveIndicator.style.color = '#f00';
-    powerStatus.textContent = '⚡ Power: Off';
+    powerStatus.textContent = '⚡ Power Off';
     countdownBadge.textContent = `⏳ ${data.message}`;
-  } else { // after
+  } else {
     msgEl.textContent = data.message;
     barEl.style.width = '100%';
     liveIndicator.style.color = '#0f0';
-    powerStatus.textContent = '⚡ Power: On';
+    powerStatus.textContent = '⚡ Power On';
     countdownBadge.textContent = '✅ Power On';
   }
 }
@@ -368,13 +402,13 @@ document.getElementById('export-modal-csv').addEventListener('click', () => {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.csv'; a.click();
 });
 
-// Export CSV buttons on room cards
+// Export CSV from room cards
 document.querySelectorAll('.export-btn').forEach(btn => {
   btn.addEventListener('click', async () => {
     const board = btn.dataset.board;
     const today = new Date().toISOString().slice(0,10);
     const data = await fetchDataRange(board, 'daily', today);
-    if (!data.length) return alert('No data for today');
+    if (!data.length) return alert('No data');
     const rows = [['Time','Temperature','Humidity']];
     data.forEach(d => rows.push([d.time, d.temp, d.humidity]));
     const csv = rows.map(r => r.join(',')).join('\n');
