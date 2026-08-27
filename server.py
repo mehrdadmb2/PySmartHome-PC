@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-PySmartHome-PC – Smart Home Server
-با لاگ‌های رنگی، زمان‌بندی قطع برق پویا، همگام‌سازی با گیت‌هاب
+PySmartHome-PC - Smart Home Server
+Optimized, clean logs, accurate outage schedule, GitHub sync.
 """
 
 import os, sys, subprocess, json, csv, time, datetime, base64, logging
@@ -17,7 +17,6 @@ class Colors:
     FAIL = '\033[91m'
     ENDC = '\033[0m'
     BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
 
 def log_info(msg):
     print(f"{Colors.OKGREEN}[INFO]{Colors.ENDC} {datetime.datetime.now().strftime('%H:%M:%S')} - {msg}")
@@ -31,22 +30,22 @@ def log_error(msg):
 def log_debug(msg):
     print(f"{Colors.OKCYAN}[DEBUG]{Colors.ENDC} {datetime.datetime.now().strftime('%H:%M:%S')} - {msg}")
 
-# غیرفعال کردن لاگ‌های مزاحم
+# Suppress noisy logs
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 logging.getLogger('apscheduler').setLevel(logging.WARNING)
 
-# نصب خودکار پیش‌نیازها
+# Install requirements quietly
 def install_requirements():
     req_file = "requirements.txt"
     if not os.path.exists(req_file):
-        log_error("فایل requirements.txt یافت نشد")
+        log_error("requirements.txt not found")
         sys.exit(1)
     try:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        log_info("✅ پیش‌نیازها نصب شدند")
+        log_info("Dependencies installed successfully")
     except Exception as e:
-        log_error(f"خطا در نصب پیش‌نیازها: {e}")
+        log_error(f"Failed to install dependencies: {e}")
         sys.exit(1)
 
 install_requirements()
@@ -69,8 +68,10 @@ try:
         GITHUB_TOKEN = content.split("token ")[1]
     else:
         GITHUB_TOKEN = content
+    if not GITHUB_TOKEN:
+        raise ValueError("Token is empty")
 except:
-    log_error("config.txt پیدا نشد یا معتبر نیست")
+    log_error("config.txt not found or invalid")
     sys.exit(1)
 
 ESP32_HUB_URL = "http://192.168.1.119/api/status"
@@ -80,8 +81,8 @@ DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 OUTAGE_FILE = "outage_schedule.json"
 
-# ========== مدیریت قطع برق ==========
-SLOTS = [9, 11, 13, 15, 17, 19]  # ساعت شروع هر بازه ۲ ساعته
+# ========== Outage Schedule Logic (Core) ==========
+SLOTS = [9, 11, 13, 15, 17, 19]  # start hours of 2-hour blocks (9-11, 11-13, ..., 19-21)
 
 def load_outage():
     if os.path.exists(OUTAGE_FILE):
@@ -100,29 +101,33 @@ outage_schedule = load_outage()
 
 def generate_outage_schedule(reference_date, reference_start_hour):
     """
-    تولید برنامه قطع برق برای دیروز، امروز، فردا و چند روز آینده.
-    بازه‌ها: 9-11, 11-13, 13-15, 15-17, 17-19, 19-21
-    جمعه‌ها برق نیست.
+    Generate schedule for yesterday, today, tomorrow and next days.
+    Slots: 9-11, 11-13, 13-15, 15-17, 17-19, 19-21.
+    Skips Fridays (weekday == 4).
+    The slot shifts forward by one each day (excluding Fridays).
     """
     if reference_start_hour not in SLOTS:
-        reference_start_hour = 13  # پیش‌فرض
+        reference_start_hour = 13  # default
     ref_slot = SLOTS.index(reference_start_hour)
     current_date = datetime.datetime.strptime(reference_date, "%Y-%m-%d").date()
 
-    for delta in range(-1, 6):  # از دیروز تا ۵ روز آینده
+    # We generate from yesterday to 5 days ahead
+    for delta in range(-1, 6):
         d = current_date + datetime.timedelta(days=delta)
-        if d.weekday() == 4:  # جمعه
+        if d.weekday() == 4:  # Friday - skip
             continue
-        # محاسبه شیفت بر اساس تعداد روزهای غیر جمعه
+
+        # Count non-Friday days between reference and d
+        # Positive for future, negative for past
         non_friday_count = 0
         step = 1 if delta >= 0 else -1
         for i in range(1, abs(delta) + 1):
             tmp = current_date + datetime.timedelta(days=i * step)
             if tmp.weekday() != 4:
                 non_friday_count += 1
-        # اگر دیروز باشد، شیفت منفی می‌شود
         if delta < 0:
             non_friday_count = -non_friday_count
+
         slot = (ref_slot + non_friday_count) % len(SLOTS)
         start_h = SLOTS[slot]
         end_h = start_h + 2
@@ -135,25 +140,20 @@ def generate_outage_schedule(reference_date, reference_start_hour):
         }
     save_outage(outage_schedule)
 
-# اگر امروز در برنامه نبود، تولید کن
+# If today not in schedule, generate with default (13:00-15:00)
 today_str = datetime.date.today().isoformat()
 if today_str not in outage_schedule:
-    # ساعت مرجع را از برنامه امروز اگر موجود است بگیریم، وگرنه ۱۳
-    ref_hour = 13
-    if today_str in outage_schedule:
-        ref_hour = int(outage_schedule[today_str]["start"].split(":")[0])
-    generate_outage_schedule(today_str, ref_hour)
+    generate_outage_schedule(today_str, 13)
+    log_info("Outage schedule generated")
 
-log_info("📅 برنامه قطع برق بارگذاری شد")
-
-# ========== وضعیت سنسورها ==========
+# ========== Sensor State ==========
 sensors = {
     "esp32_1": {"temp": 0, "hum": 0, "last_seen": 0},
     "esp32_s3": {"temp": 0, "hum": 0, "last_seen": 0}
 }
-NODE_TIMEOUT = 600  # ۱۰ دقیقه
+NODE_TIMEOUT = 600  # 10 minutes
 
-# ========== گیت‌هاب ==========
+# ========== GitHub Helpers ==========
 def upload_file_to_github(path, content):
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "User-Agent": "PySmartHome"}
@@ -169,11 +169,11 @@ def upload_file_to_github(path, content):
             data["sha"] = sha
         r = requests.put(url, headers=headers, json=data, timeout=10)
         if r.status_code >= 400:
-            log_warning(f"❌ آپلود به گیت‌هاب برای {path} ناموفق: {r.status_code}")
+            log_warning(f"GitHub upload failed for {path}: {r.status_code}")
         else:
-            log_info(f"✅ آپلود به گیت‌هاب: {path}")
+            log_info(f"GitHub upload OK: {path}")
     except Exception as e:
-        log_error(f"❌ خطای گیت‌هاب: {e}")
+        log_error(f"GitHub error: {e}")
 
 def push_to_github():
     today = datetime.date.today().isoformat()
@@ -184,18 +184,16 @@ def push_to_github():
             with open(fpath, "r") as f:
                 upload_file_to_github(f"data/{fname}", f.read())
             time.sleep(0.3)
-    # وضعیت
     status = {
         "esp32_1_online": (time.time() - sensors["esp32_1"]["last_seen"]) < NODE_TIMEOUT,
         "esp32_s3_online": (time.time() - sensors["esp32_s3"]["last_seen"]) < NODE_TIMEOUT,
         "last_push": datetime.datetime.now().isoformat()
     }
     upload_file_to_github("status.json", json.dumps(status))
-    # برنامه قطع برق
     with open(OUTAGE_FILE, "r", encoding="utf-8") as f:
         upload_file_to_github(OUTAGE_FILE, f.read())
 
-# ========== ثبت CSV ==========
+# ========== CSV Logging ==========
 def log_to_csv(board, temp, hum):
     today = datetime.date.today().isoformat()
     filename = os.path.join(DATA_DIR, f"{board}_{today}.csv")
@@ -207,7 +205,7 @@ def log_to_csv(board, temp, hum):
         now = datetime.datetime.now().strftime("%H:%M:%S")
         writer.writerow([now, f"{temp:.1f}", f"{hum:.1f}"])
 
-# ========== پول کردن سنسورها ==========
+# ========== Sensor Polling ==========
 def poll_sensors():
     for name, url in [("esp32_1", ESP32_HUB_URL), ("esp32_s3", ESP32_S3_URL)]:
         try:
@@ -218,11 +216,11 @@ def poll_sensors():
                 sensors[name]["hum"] = data["humidity"]
                 sensors[name]["last_seen"] = time.time()
                 log_to_csv(name, data["temp"], data["humidity"])
-                log_info(f"📡 {name} -> {data['temp']:.1f}°C, {data['humidity']:.0f}%")
+                log_info(f"Sensor {name} -> {data['temp']:.1f}°C, {data['humidity']:.0f}%")
             else:
-                log_warning(f"⚠️ {name} HTTP {resp.status_code}")
+                log_warning(f"Sensor {name} HTTP {resp.status_code}")
         except Exception as e:
-            log_warning(f"⚠️ {name} آفلاین: {e}")
+            log_warning(f"Sensor {name} offline: {e}")
 
 # ========== Flask App ==========
 app = Flask(__name__)
@@ -287,7 +285,7 @@ def update_outage():
         return 'invalid', 400
     outage_schedule[date_str] = {"start": start, "end": end}
     save_outage(outage_schedule)
-    log_info(f"✏️ برنامه قطع برق برای {date_str} به {start} - {end} تغییر کرد")
+    log_info(f"Outage updated for {date_str}: {start} - {end}")
     return jsonify({'status': 'ok'})
 
 @app.route('/api/outage/countdown')
@@ -304,19 +302,19 @@ def outage_countdown():
         return jsonify({
             "status": "before",
             "total_seconds": int(diff.total_seconds()),
-            "message": f"⏳ قطع برق در {diff.seconds//3600}h {(diff.seconds//60)%60}m"
+            "message": f"Power cut in {diff.seconds//3600}h {(diff.seconds//60)%60}m"
         })
     elif now < end:
         diff = end - now
         return jsonify({
             "status": "during",
             "total_seconds": int(diff.total_seconds()),
-            "message": f"⚡ وصل شدن در {diff.seconds//3600}h {(diff.seconds//60)%60}m"
+            "message": f"Power returns in {diff.seconds//3600}h {(diff.seconds//60)%60}m"
         })
     else:
-        return jsonify({"status": "after", "message": "✅ برق وصل است"})
+        return jsonify({"status": "after", "message": "Power is on"})
 
-# مدیریت فایل‌ها (مشابه قبل)
+# File management endpoints
 @app.route('/api/files')
 def list_files():
     items = []
@@ -327,7 +325,7 @@ def list_files():
             if name.startswith('.'):
                 continue
             full = os.path.relpath(os.path.join(dirpath, name)).replace('\\', '/')
-            items.append({'name': name, 'path': full, 'size': os.path.getsize(full), 'is_dir': False})
+            items.append({'name': name, 'path': full, 'size': os.path.getsize(full)})
     return jsonify(items)
 
 @app.route('/api/download')
@@ -360,13 +358,13 @@ def delete_file():
         return 'deleted', 200
     return 'not found', 404
 
-# ========== راه‌اندازی ==========
+# ========== Startup ==========
 if __name__ == '__main__':
-    log_info("🚀 راه‌اندازی سرور SmartHome...")
+    log_info("Starting SmartHome server...")
     scheduler = BackgroundScheduler()
     scheduler.add_job(poll_sensors, 'interval', seconds=10)
     scheduler.add_job(push_to_github, 'interval', minutes=5)
     scheduler.start()
-    poll_sensors()  # اولین پول
-    log_info("🌐 سرور روی http://0.0.0.0:5000 اجرا می‌شود")
+    poll_sensors()
+    log_info("Server running on http://0.0.0.0:5000")
     app.run(host='0.0.0.0', port=5000, debug=False)
