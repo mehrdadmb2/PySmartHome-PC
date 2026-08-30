@@ -44,39 +44,7 @@ ESP32_S3_URL = os.getenv("PYSMART_ESP32_S3_URL", "http://192.168.1.115/api/statu
 GITHUB_USER = os.getenv("PYSMART_GITHUB_USER", "mehrdadmb2")
 GITHUB_REPO = os.getenv("PYSMART_GITHUB_REPO", "PySmartHome-PC")
 GITHUB_BRANCH = os.getenv("PYSMART_GITHUB_BRANCH", "main")
-def load_github_token() -> str:
-    """Load the GitHub token from the local config.txt file only.
-
-    Accepted formats:
-      token github_pat_...
-      github_pat_...
-
-    config.txt is intentionally git-ignored and must never be committed.
-    """
-    config_file = BASE_DIR / "config.txt"
-    try:
-        raw = config_file.read_text(encoding="utf-8").strip()
-    except OSError:
-        logger.warning("config.txt not found; GitHub sync is disabled", extra={"category": "SYNC"})
-        return ""
-
-    if not raw:
-        logger.warning("config.txt is empty; GitHub sync is disabled", extra={"category": "SYNC"})
-        return ""
-
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.lower().startswith("token "):
-            return line[6:].strip()
-        if line.lower().startswith("github_token="):
-            return line.split("=", 1)[1].strip()
-        return line
-    return ""
-
-
-GITHUB_TOKEN = load_github_token()
+GITHUB_TOKEN = os.getenv("PYSMART_GITHUB_TOKEN", "").strip()
 
 BOARDS = {
     "esp32_1": {"name": "Room 1 • Hub", "short": "Room 1", "url": ESP32_HUB_URL},
@@ -502,7 +470,7 @@ def publish_to_github_once() -> bool:
             runtime["last_publish"] = iso_now()
             runtime["last_publish_ok"] = False
             runtime["publish_error"] = "GitHub token is not configured"
-        logger.info("GitHub sync skipped (config.txt token not configured)", extra={"category": "SYNC"})
+        logger.info("GitHub sync skipped (token not configured)", extra={"category": "SYNC"})
         return False
 
     try:
@@ -702,7 +670,7 @@ if __name__ == "__main__":
     logger.info("Room 1 endpoint: %s", ESP32_HUB_URL, extra={"category": "CFG"})
     logger.info("Room 2 endpoint: %s", ESP32_S3_URL, extra={"category": "CFG"})
     logger.info("Iran time zone: Asia/Tehran (UTC+03:30)", extra={"category": "TIME"})
-    logger.info("GitHub sync: %s", "enabled (config.txt)" if github_enabled() else "disabled (config.txt missing/empty)", extra={"category": "SYNC"})
+    logger.info("GitHub sync: %s", "enabled" if github_enabled() else "disabled", extra={"category": "SYNC"})
     logger.info("Outage reference: today 13:00–15:00 • Friday skipped", extra={"category": "OUTAGE"})
     start_worker()
     app.run(host=HOST, port=PORT, debug=False, threaded=True)

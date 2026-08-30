@@ -10,9 +10,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Background is auto-inserted by bg.js -->
-
-  <header class="topbar">
+  <header class="topbar glass-panel">
     <div class="brand-block">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <div>
@@ -60,7 +58,7 @@
     </section>
 
     <section class="section-block">
-      <div class="section-heading"><div><span class="eyebrow">ROOM TELEMETRY</span><h3>Live environment</h3></div><span class="section-badge" id="telemetry-refresh">AUTO • 8s</span></div>
+      <div class="section-heading"><div><span class="eyebrow">ROOM TELEMETRY</span><h3>Live environment</h3></div><span class="section-badge" id="telemetry-refresh">AUTO • 10s</span></div>
       <div class="room-grid">
         <article class="room-card glass-panel" id="room-esp32_1">
           <div class="room-topline"><div class="room-title"><div class="node-logo purple"><span>⌂</span></div><div><span class="room-kicker">NODE 01</span><h4>Room 1 <em>• Hub</em></h4></div></div><div class="node-state"><span class="status-dot"></span><span class="node-state-text">OFFLINE</span></div></div>
@@ -131,15 +129,7 @@
           <div class="outage-times"><div><small>OUTAGE START</small><strong id="outage-start-time">--:--</strong></div><div><small>OUTAGE END</small><strong id="outage-end-time">--:--</strong></div><div><small>NEXT OUTAGE</small><strong id="next-outage-time">--</strong></div></div>
         </div>
         <div class="cycle-card">
-          <div class="cycle-orbit">
-            <div class="orbit-ring"></div>
-            <div class="orbit-ring"></div>
-            <div class="orbit-ring"></div>
-            <div class="orbit-dot"></div>
-            <div class="orbit-dot"></div>
-            <div class="orbit-dot"></div>
-            <div class="orbit-center"><strong>2H</strong></div>
-          </div>
+          <div class="cycle-orbit"><span></span><span></span><span></span><strong>2H</strong></div>
           <div><span class="eyebrow">CYCLE RULE</span><h4>Rolling 2-hour slots</h4><p>09–11 → 11–13 → 13–15 → 15–17 → 17–19 → 19–21 → back to 09–11.</p><p>Friday does not consume a slot.</p></div>
         </div>
       </div>
@@ -180,7 +170,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
-  <script src="bg.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

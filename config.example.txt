@@ -1,0 +1,6 @@
+# LOCAL ONLY - copy this file to config.txt
+# Never commit config.txt to GitHub.
+# Accepted format:
+# token github_pat_XXXXXXXXXXXXXXXXXXXXXXXX
+
+token YOUR_GITHUB_TOKEN_HERE
