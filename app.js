@@ -4,7 +4,7 @@
   const CONFIG = {
     timezone: 'Asia/Tehran',
     tempAlertDefault: 35,
-    refreshMs: 10000,
+    refreshMs: 8000,
     chartMaxPoints: 2500,
   };
 
@@ -19,15 +19,13 @@
     outageTick: null,
     lastData: [],
     requestSeq: 0,
+    prevValues: {},
   };
 
   const $ = (id) => document.getElementById(id);
   const qsa = (sel) => [...document.querySelectorAll(sel)];
 
-  const I18N = {
-    online: 'ONLINE', offline: 'OFFLINE', connecting: 'Detecting connection…', local: 'LOCAL API', public: 'PUBLIC SNAPSHOT',
-  };
-
+  // ---- helpers ----
   function tehranFormatter(options = {}) {
     return new Intl.DateTimeFormat('en-US', { timeZone: CONFIG.timezone, ...options });
   }
@@ -167,10 +165,12 @@
     };
   }
 
+  // ---- dashboard refresh ----
   async function refreshDashboard() {
     try {
+      const oldData = state.dashboard;
       state.dashboard = await loadDashboard();
-      renderDashboard();
+      renderDashboard(oldData);
     } catch (error) {
       showToast(`Dashboard refresh failed: ${error.message}`, 'error');
       setText('system-note', 'Telemetry is temporarily unavailable. The dashboard will keep retrying automatically.');
@@ -187,14 +187,36 @@
     }
   }
 
-  function renderDashboard() {
+  function animateValue(elementId, newValue, prefix = '', suffix = '', duration = 400) {
+    const el = $(elementId);
+    if (!el) return;
+    const old = parseFloat(el.textContent.replace(/[^0-9.-]/g, ''));
+    if (Number.isNaN(old) || old === newValue) {
+      el.textContent = prefix + formatNumber(newValue, 1) + suffix;
+      return;
+    }
+    const startTime = performance.now();
+    const startVal = old;
+    const endVal = newValue;
+    function update(now) {
+      const progress = Math.min((now - startTime) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const current = startVal + (endVal - startVal) * eased;
+      el.textContent = prefix + formatNumber(current, 1) + suffix;
+      if (progress < 1) requestAnimationFrame(update);
+      else el.textContent = prefix + formatNumber(endVal, 1) + suffix;
+    }
+    requestAnimationFrame(update);
+  }
+
+  function renderDashboard(oldData) {
     const d = state.dashboard;
     const nodes = d?.nodes || {};
     const server = d?.server || {};
     const onlineCount = Object.values(nodes).filter(n => n?.online).length;
     const allGood = onlineCount === Object.keys(nodes).length && Object.keys(nodes).length > 0;
     setText('system-status', allGood ? 'ALL SYSTEMS STABLE' : onlineCount ? `${onlineCount}/2 NODES ONLINE` : 'TELEMETRY DEGRADED');
-    setText('connection-text', state.mode === 'local' ? I18N.local : I18N.public);
+    setText('connection-text', state.mode === 'local' ? 'LOCAL API' : 'PUBLIC SNAPSHOT');
     $('connection-pill')?.querySelector('.pulse-dot')?.style && ($('connection-pill').querySelector('.pulse-dot').style.background = allGood ? 'var(--green)' : 'var(--amber)');
 
     setText('hero-uptime', formatDuration(server.uptime_seconds));
@@ -204,11 +226,19 @@
     setText('health-worker', state.mode === 'local' ? (d.config ? 'Running' : 'Unknown') : 'Snapshot');
     setText('health-github', d?.server?.publish_ok === false ? 'Degraded' : 'OK');
     setText('health-threshold', `${formatNumber(d?.thresholds?.temperature_alert_c ?? d?.config?.temperature_alert_c ?? CONFIG.tempAlertDefault, 0)} °C`);
+    
+    // ===== FIX: Power state =====
+    const powerStatus = allGood ? 'Stable' : (onlineCount > 0 ? 'Partial' : 'Offline');
+    setText('health-power', powerStatus);
+    
     setText('system-note', state.mode === 'local' ? 'Local control plane is active. Live sensor polling and GitHub publication run independently in the background.' : `Public snapshot mode. Last published snapshot: ${d.generated_at ? formatDate(new Date(d.generated_at), {year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '--'}.`);
     $('health-orb')?.style && ($('health-orb').style.background = allGood ? 'var(--green)' : 'var(--amber)');
 
     const threshold = d?.thresholds?.temperature_alert_c ?? d?.config?.temperature_alert_c ?? CONFIG.tempAlertDefault;
-    for (const [board, node] of Object.entries(nodes)) renderNode(board, node, threshold);
+    for (const [board, node] of Object.entries(nodes)) {
+      const oldNode = oldData?.nodes?.[board] || {};
+      renderNode(board, node, threshold, oldNode);
+    }
   }
 
   async function renderNodeData(board) {
@@ -217,10 +247,12 @@
       const stats = nodeStats(data);
       const node = state.dashboard?.nodes?.[board];
       if (stats && node) {
-        setText(`temp-${board}`, formatNumber(node.temperature ?? stats.last.temperature, 1));
-        setText(`hum-${board}`, formatNumber(node.humidity ?? stats.last.humidity, 0));
-        setText(`range-${board}`, `${formatNumber(stats.min,1)} / ${formatNumber(stats.max,1)}°`);
-        setText(`avg-${board}`, `${formatNumber(stats.avg,1)}°`);
+        animateValue(`temp-${board}`, stats.last.temperature, '', '°');
+        animateValue(`hum-${board}`, stats.last.humidity, '', '%');
+        const rangeText = `${formatNumber(stats.min,1)} / ${formatNumber(stats.max,1)}°`;
+        const avgText = `${formatNumber(stats.avg,1)}°`;
+        setText(`range-${board}`, rangeText);
+        setText(`avg-${board}`, avgText);
         setText(`latency-${board}`, node.latency_ms == null ? '--' : `${formatNumber(node.latency_ms)} ms`);
         setText(`samples-${board}`, formatNumber(node.samples ?? stats.count));
         setText(`updated-${board}`, node.last_seen ? `Last sample ${formatRelative(node.last_seen)}` : 'No successful sample yet');
@@ -229,18 +261,27 @@
     } catch (_) {}
   }
 
-  function renderNode(board, node, threshold) {
+  function renderNode(board, node, threshold, oldNode) {
     const root = $(`room-${board}`);
     if (!root) return;
     const online = Boolean(node?.online);
-    root.querySelector('.status-dot').style.background = online ? 'var(--green)' : 'var(--red)';
+    const dot = root.querySelector('.status-dot');
+    dot.style.background = online ? 'var(--green)' : 'var(--red)';
+    dot.style.boxShadow = online ? '0 0 0 5px rgba(81,227,155,.2)' : '0 0 0 5px rgba(255,111,142,.2)';
     root.querySelector('.node-state-text').textContent = online ? 'ONLINE' : 'OFFLINE';
-    setText(`temp-${board}`, node?.temperature == null ? '--' : formatNumber(node.temperature, 1));
-    setText(`hum-${board}`, node?.humidity == null ? '--' : formatNumber(node.humidity, 0));
+
+    const newTemp = node?.temperature;
+    const newHum = node?.humidity;
+    if (newTemp != null) animateValue(`temp-${board}`, newTemp, '', '°');
+    else setText(`temp-${board}`, '--');
+    if (newHum != null) animateValue(`hum-${board}`, newHum, '', '%');
+    else setText(`hum-${board}`, '--');
+
     setText(`latency-${board}`, node?.latency_ms == null ? '--' : `${formatNumber(node.latency_ms)} ms`);
     setText(`samples-${board}`, formatNumber(node?.samples ?? 0));
     setText(`updated-${board}`, node?.last_seen ? `Last sample ${formatRelative(node.last_seen)}` : 'No successful sample yet');
     toggleClass(`alert-${board}`, 'hidden', !(Number(node?.temperature) > threshold));
+
     renderNodeData(board);
   }
 
@@ -262,6 +303,7 @@
     return formatDate(d, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
   }
 
+  // ---- chart ----
   async function renderChart() {
     const seq = ++state.requestSeq;
     try {
@@ -325,7 +367,11 @@
       type:'line', data:{labels,datasets},
       options:{
         responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
-        plugins:{legend:{labels:{color:text,font:{size:11,weight:'600'},usePointStyle:true,boxWidth:8}},tooltip:{backgroundColor:'rgba(8,16,30,.92)',titleColor:'#fff',bodyColor:'#c1ccdd',borderColor:grid,borderWidth:1,padding:10}},
+        plugins:{
+          legend:{labels:{color:text,font:{size:11,weight:'600'},usePointStyle:true,boxWidth:8}},
+          tooltip:{backgroundColor:'rgba(8,16,30,.92)',titleColor:'#fff',bodyColor:'#c1ccdd',borderColor:grid,borderWidth:1,padding:10},
+          zoom:{pan:{enabled:true,mode:'x'},zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x'}}
+        },
         scales:{
           x:{ticks:{color:text,maxTicksLimit:9,font:{size:9}},grid:{color:'transparent'}},
           y:{position:'left',beginAtZero:false,ticks:{color:text,font:{size:9}},grid:{color:grid}},
@@ -333,11 +379,6 @@
         },
         elements:{line:{tension:.32,borderWidth:2},point:{radius:0,hoverRadius:4}},
         animation:{duration:450},
-        plugins:{
-          legend:{labels:{color:text,font:{size:11,weight:'600'},usePointStyle:true,boxWidth:8}},
-          tooltip:{backgroundColor:'rgba(8,16,30,.92)',titleColor:'#fff',bodyColor:'#c1ccdd',borderColor:grid,borderWidth:1,padding:10},
-          zoom:{pan:{enabled:true,mode:'x'},zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x'}}
-        }
       }
     });
   }
@@ -361,6 +402,7 @@
     setText('insight-alert-note', hot ? `A sample exceeded ${formatNumber(threshold,0)} °C.` : `No sample exceeded ${formatNumber(threshold,0)} °C in this range.`);
   }
 
+  // ---- outage ----
   function renderOutageDays() {
     const schedule = state.outage?.schedule || state.outage || {};
     const todayISO = tehranDateISO();
@@ -414,7 +456,6 @@
     const now = Date.now();
     const todayISO = tehranDateISO();
     const todayItem = schedule[todayISO];
-    const nowMinutes = Number(new Intl.DateTimeFormat('en-GB', {timeZone:CONFIG.timezone,hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date()).replace(':','.'));
     const [hh,mm] = new Intl.DateTimeFormat('en-GB',{timeZone:CONFIG.timezone,hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date()).split(':').map(Number);
     const minsNow = hh * 60 + mm;
 
@@ -538,6 +579,13 @@
 
   function showToast(message,type='ok') { const stack=$('toast-stack'); const el=document.createElement('div'); el.className=`toast ${type}`; el.textContent=message; stack.appendChild(el); setTimeout(()=>el.remove(),4200); }
 
+  function hhmm(minutes) {
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes % 60);
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  }
+
+  // ---- event binding ----
   function bindEvents() {
     $('theme-toggle')?.addEventListener('click',()=>applyTheme((document.documentElement.dataset.theme||'midnight')==='midnight'?'light':'midnight'));
     $('fullscreen-btn')?.addEventListener('click',()=>document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.());
@@ -556,12 +604,13 @@
     window.addEventListener('resize',()=>state.chart?.resize());
   }
 
+  // ---- boot ----
   async function boot() {
     applyTheme(localStorage.getItem('psh-theme')||'midnight');
     $('chart-date').value = state.date;
     bindEvents(); updateClock(); setInterval(updateClock,1000);
     state.mode = await detectMode();
-    setText('connection-text',state.mode==='local'?I18N.local:I18N.public);
+    setText('connection-text',state.mode==='local'?'LOCAL API':'PUBLIC SNAPSHOT');
     await Promise.all([refreshDashboard(),refreshOutage(),renderChart()]);
     setInterval(refreshDashboard,CONFIG.refreshMs);
     setInterval(refreshOutage,60000);
