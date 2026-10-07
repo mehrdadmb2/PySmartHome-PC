@@ -8,9 +8,8 @@
 #include <WebServer.h>
 #include <DHT.h>
 #include <Adafruit_SSD1306.h>
+#include "secrets.h"
 
-const char* ssid = ">><<>><<";
-const char* password = "MEHRdAd1380";
 IPAddress localIP(192, 168, 1, 115);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
@@ -21,11 +20,30 @@ IPAddress subnet(255, 255, 255, 0);
 #define I2C_SCL 4
 #define OLED_ADDR 0x3C
 
+// DHT22 retry configuration
+#define DHT_MAX_RETRIES 3
+#define DHT_RETRY_DELAY_MS 2000
+
 DHT dht(DHTPIN, DHTTYPE);
 Adafruit_SSD1306 display(128, 32, &Wire, -1);
 WebServer server(80);
 
 float currentTemp = 0, currentHum = 0;
+
+bool readDHT22WithRetry(float &t, float &h) {
+  for (int attempt = 1; attempt <= DHT_MAX_RETRIES; attempt++) {
+    t = dht.readTemperature();
+    h = dht.readHumidity();
+    if (!isnan(t) && !isnan(h)) {
+      return true;
+    }
+    Serial.printf("[SENSOR] Read failed (attempt %d/%d)\n", attempt, DHT_MAX_RETRIES);
+    if (attempt < DHT_MAX_RETRIES) {
+      delay(DHT_RETRY_DELAY_MS);
+    }
+  }
+  return false;
+}
 
 void setup() {
   Serial.begin(115200);
@@ -46,7 +64,7 @@ void setup() {
   display.display();
 
   WiFi.config(localIP, gateway, subnet);
-  WiFi.begin(ssid, password);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) delay(500);
   Serial.print("[WiFi] OK, IP: ");
   Serial.println(WiFi.localIP());
@@ -65,11 +83,12 @@ void setup() {
 void loop() {
   server.handleClient();
   static unsigned long lastRead = 0;
+  static int failCount = 0;
   if (millis() - lastRead >= 5000) {
     lastRead = millis();
-    float t = dht.readTemperature();
-    float h = dht.readHumidity();
-    if (!isnan(t) && !isnan(h)) {
+    float t, h;
+    if (readDHT22WithRetry(t, h)) {
+      failCount = 0;
       currentTemp = t; currentHum = h;
       Serial.printf("[SENSOR] %.1f C, %.1f %%\n", t, h);
 
@@ -81,7 +100,13 @@ void loop() {
       display.print(WiFi.localIP());
       display.display();
     } else {
-      Serial.println("[SENSOR] Read failed");
+      failCount++;
+      Serial.printf("[SENSOR] Failed after %d attempts • failCount=%d\n", DHT_MAX_RETRIES, failCount);
+      if (failCount >= 3) {
+        Serial.println("[SENSOR] Multiple failures, reinitializing DHT...");
+        dht.begin();
+        failCount = 0;
+      }
     }
   }
   yield();
