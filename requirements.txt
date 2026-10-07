@@ -1,2 +1,8 @@
 Flask>=3.0,<4
 requests>=2.31,<3
+jdatetime>=4.0,<5
+
+# Development dependencies
+pytest>=7.0
+pytest-cov>=4.0
+flake8>=6.0
