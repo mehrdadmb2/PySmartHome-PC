@@ -1,0 +1,364 @@
+openapi: 3.0.0
+info:
+  title: PySmartHome-PC API
+  description: |
+    REST API for PySmartHome-PC - a resilient smart home system.
+    
+    The server polls ESP32 sensor nodes, logs data to CSV, and provides
+    a local dashboard with real-time updates.
+  version: 3.0.0
+  license:
+    name: MIT
+    url: https://github.com/mehrdadmb2/PySmartHome-PC/blob/main/LICENSE
+
+servers:
+  - url: http://localhost:5000
+    description: Local development server
+  - url: http://192.168.1.100:5000
+    description: Local network server
+
+tags:
+  - name: Health
+    description: Health check and service status
+  - name: Dashboard
+    description: Dashboard data and sensor readings
+  - name: Data
+    description: Historical sensor data
+  - name: Outage
+    description: Power outage schedule management
+  - name: System
+    description: System information and datetime
+
+paths:
+  /api/health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Returns service status and configuration
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  service:
+                    type: string
+                    example: PySmartHome-PC
+                  schema_version:
+                    type: integer
+                    example: 3
+                  time:
+                    type: string
+                    format: date-time
+                  timezone:
+                    type: string
+                    example: Asia/Tehran
+                  github_sync_enabled:
+                    type: boolean
+                    example: true
+                  worker_started:
+                    type: boolean
+                    example: true
+
+  /api/dashboard:
+    get:
+      tags:
+        - Dashboard
+      summary: Complete dashboard snapshot
+      description: Returns all sensor data, server status, and configuration
+      responses:
+        '200':
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  time:
+                    type: string
+                    format: date-time
+                  timezone:
+                    type: string
+                    example: Asia/Tehran
+                  nodes:
+                    type: object
+                    additionalProperties:
+                      $ref: '#/components/schemas/Node'
+                  server:
+                    $ref: '#/components/schemas/ServerStatus'
+                  config:
+                    $ref: '#/components/schemas/Config'
+
+  /api/data:
+    get:
+      tags:
+        - Data
+      summary: Historical sensor data
+      description: Returns historical CSV data for a specific board and date range
+      parameters:
+        - name: board
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [esp32_1, esp32_s3]
+          description: Board identifier
+        - name: range
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [daily, yesterday, weekly, monthly]
+          description: Date range
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: End date for the range (YYYY-MM-DD)
+      responses:
+        '200':
+          description: Historical data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  board:
+                    type: string
+                  range:
+                    type: string
+                  date:
+                    type: string
+                    format: date
+                  count:
+                    type: integer
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SensorReading'
+        '400':
+          description: Invalid parameters
+
+  /api/outage:
+    get:
+      tags:
+        - Outage
+      summary: Power outage schedule
+      description: Returns the current power outage schedule
+      responses:
+        '200':
+          description: Outage schedule
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generated_at:
+                    type: string
+                    format: date-time
+                  timezone:
+                    type: string
+                    example: Asia/Tehran
+                  cycle:
+                    type: object
+                    properties:
+                      duration_minutes:
+                        type: integer
+                        example: 120
+                      slots:
+                        type: array
+                        items:
+                          type: string
+                        example: ["09:00", "11:00", "13:00", "15:00", "17:00", "19:00"]
+                      skip_friday:
+                        type: boolean
+                        example: true
+                  schedule:
+                    type: object
+                    additionalProperties:
+                      $ref: '#/components/schemas/OutageSlot'
+
+  /api/outage/update:
+    post:
+      tags:
+        - Outage
+      summary: Update outage schedule
+      description: Updates the outage schedule from a reference date and time
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - date
+                - start
+                - end
+              properties:
+                date:
+                  type: string
+                  format: date
+                  example: "2025-08-12"
+                start:
+                  type: string
+                  pattern: '^\d{2}:\d{2}$'
+                  example: "13:00"
+                end:
+                  type: string
+                  pattern: '^\d{2}:\d{2}$'
+                  example: "15:00"
+      responses:
+        '200':
+          description: Schedule updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  published:
+                    type: boolean
+                  schedule:
+                    type: object
+        '400':
+          description: Invalid parameters
+
+  /api/datetime:
+    get:
+      tags:
+        - System
+      summary: Current datetime
+      description: Returns current Gregorian and Jalali datetime
+      responses:
+        '200':
+          description: Current datetime
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  timezone:
+                    type: string
+                    example: Asia/Tehran
+                  iso:
+                    type: string
+                    format: date-time
+                  gregorian:
+                    type: string
+                    example: "2025-08-12 13:00:00"
+                  shamsi:
+                    type: string
+                    nullable: true
+
+components:
+  schemas:
+    Node:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Room 1 • Hub"
+        online:
+          type: boolean
+          example: true
+        temperature:
+          type: number
+          nullable: true
+          example: 28.5
+        humidity:
+          type: number
+          nullable: true
+          example: 45.0
+        last_seen:
+          type: string
+          format: date-time
+          nullable: true
+        last_error:
+          type: string
+          nullable: true
+        latency_ms:
+          type: integer
+          nullable: true
+          example: 150
+        samples:
+          type: integer
+          example: 100
+        consecutive_failures:
+          type: integer
+          example: 0
+
+    ServerStatus:
+      type: object
+      properties:
+        uptime_seconds:
+          type: integer
+          example: 3600
+        last_poll:
+          type: string
+          format: date-time
+          nullable: true
+        last_publish:
+          type: string
+          format: date-time
+          nullable: true
+        publish_ok:
+          type: boolean
+          example: true
+        publish_error:
+          type: string
+          nullable: true
+        poll_cycles:
+          type: integer
+          example: 360
+
+    Config:
+      type: object
+      properties:
+        temperature_alert_c:
+          type: number
+          example: 35
+        poll_interval_s:
+          type: integer
+          example: 10
+        node_timeout_s:
+          type: integer
+          example: 45
+        local_mode:
+          type: boolean
+          example: true
+
+    SensorReading:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+          example: "2025-08-12"
+        time:
+          type: string
+          example: "13:00:00"
+        temperature:
+          type: number
+          example: 28.5
+        humidity:
+          type: number
+          example: 45.0
+
+    OutageSlot:
+      type: object
+      properties:
+        start:
+          type: string
+          example: "13:00"
+        end:
+          type: string
+          example: "15:00"
