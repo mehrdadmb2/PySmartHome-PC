@@ -8,9 +8,8 @@
 #include <WebServer.h>
 #include <DHT.h>
 #include <Adafruit_SSD1306.h>
+#include "secrets.h"
 
-const char* ssid = ">><<>><<";
-const char* password = "MEHRdAd1380";
 IPAddress localIP(192, 168, 1, 115);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
@@ -46,7 +45,7 @@ void setup() {
   display.display();
 
   WiFi.config(localIP, gateway, subnet);
-  WiFi.begin(ssid, password);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) delay(500);
   Serial.print("[WiFi] OK, IP: ");
   Serial.println(WiFi.localIP());
