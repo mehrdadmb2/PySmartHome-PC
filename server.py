@@ -2,7 +2,7 @@
 """PySmartHome-PC - resilient local smart-home dashboard server.
 
 One shared frontend is served locally and also committed to GitHub Pages.
-The `data/` directory is the only runtime data directory.
+The data/ directory is the only runtime data directory.
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import math
 import os
 import threading
 import time
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +45,40 @@ ESP32_S3_URL = os.getenv("PYSMART_ESP32_S3_URL", "http://192.168.1.115/api/statu
 GITHUB_USER = os.getenv("PYSMART_GITHUB_USER", "mehrdadmb2")
 GITHUB_REPO = os.getenv("PYSMART_GITHUB_REPO", "PySmartHome-PC")
 GITHUB_BRANCH = os.getenv("PYSMART_GITHUB_BRANCH", "main")
-GITHUB_TOKEN = os.getenv("PYSMART_GITHUB_TOKEN", "").strip()
+
+
+def load_github_token() -> str:
+    \"\"\"Load GitHub token from config.txt or environment variable.
+    
+    Priority:
+    1. config.txt file (if exists and contains valid token)
+    2. PYSMART_GITHUB_TOKEN environment variable
+    
+    Returns:
+        GitHub personal access token string
+    \"\"\"
+    config_file = BASE_DIR / "config.txt"
+    if config_file.exists():
+        try:
+            for line in config_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line.startswith("token "):
+                    token_value = line.split(" ", 1)[1].strip()
+                    if token_value:
+                        return token_value
+        except OSError:
+            pass
+    return os.getenv("PYSMART_GITHUB_TOKEN", "").strip()
+
+
+GITHUB_TOKEN = load_github_token()
+
+# API Authentication
+API_KEY = os.getenv("PYSMART_API_KEY", "").strip()
+# Endpoints that require authentication (write operations)
+PROTECTED_ENDPOINTS = {"/api/upload", "/api/delete", "/api/outage/update"}
+# Endpoints that are always public (read-only)
+PUBLIC_ENDPOINTS = {"/api/health", "/api/dashboard", "/api/data", "/api/outage", "/api/datetime"}
 
 BOARDS = {
     "esp32_1": {"name": "Room 1 • Hub", "short": "Room 1", "url": ESP32_HUB_URL},
@@ -81,12 +115,25 @@ class ColorFormatter(logging.Formatter):
         message = super().format(record)
         return f"{color}[{level}]\033[0m {stamp} │ \033[96m[{category}]\033[0m {message}"
 
-handler = logging.StreamHandler()
-handler.setFormatter(ColorFormatter("%(message)s"))
+# Console handler
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(ColorFormatter("%(message)s"))
+
+# File handler with rotation
+log_file = BASE_DIR / "pysmarthome.log"
+file_handler = RotatingFileHandler(
+    log_file,
+    maxBytes=5*1024*1024,  # 5MB per file
+    backupCount=3,          # Keep 3 backup files
+    encoding="utf-8"
+)
+file_handler.setFormatter(ColorFormatter("%(message)s"))
+
 logger = logging.getLogger("pysmarthome")
 logger.setLevel(os.getenv("PYSMART_LOG_LEVEL", "INFO").upper())
 logger.handlers.clear()
-logger.addHandler(handler)
+logger.addHandler(console_handler)
+logger.addHandler(file_handler)
 logger.propagate = False
 
 # ----------------------------- state ----------------------------------------
@@ -174,6 +221,7 @@ def date_range_for(name: str, end_date: dt.date) -> list[dt.date]:
         raise ValueError("invalid range")
     return [end_date - dt.timedelta(days=o) for o in offsets]
 
+
 # --------------------------- outage engine ----------------------------------
 def default_schedule() -> dict[str, dict[str, str]]:
     """Seed the cycle around today: today = 13:00-15:00, Fridays = none."""
@@ -229,8 +277,8 @@ def generate_schedule(reference_date: dt.date, reference_start_hour: int, span: 
         cursor = reference_date
         for _ in range(abs(offset)):
             cursor += dt.timedelta(days=step)
-            if cursor.weekday() != SKIP_WEEKDAY:
-                shift += step
+        if cursor.weekday() != SKIP_WEEKDAY:
+            shift += step
         slot = SLOTS[(ref_index + shift) % len(SLOTS)]
         result[day.isoformat()] = {"start": f"{slot:02d}:00", "end": f"{slot + 2:02d}:00"}
     return result
@@ -247,7 +295,7 @@ def ensure_outage_schedule() -> None:
             # Always keep a usable window around now. Prefer the latest stored
             # reference for existing data, then generate any missing dates.
             today_key = today().isoformat()
-            if today_key not in outage_schedule and today().weekday() != SKIP_WEEKDAY:
+            for today_key not in outage_schedule and today().weekday() != SKIP_WEEKDAY:
                 # Derive today's slot from nearest stored non-Friday date.
                 nearest = min(
                     (k for k in outage_schedule if valid_date(k)),
@@ -289,6 +337,7 @@ def update_outage_from_reference(date_value: str, start: str, end: str) -> dict[
         save_outage(outage_schedule)
     logger.info("Cycle recalculated from %s %s–%s", date_value, start, end, extra={"category": "OUTAGE"})
     return dict(outage_schedule)
+
 
 # --------------------------- CSV storage ------------------------------------
 def csv_path(board: str, date_value: str) -> Path:
@@ -340,6 +389,7 @@ def read_samples(board: str, date_value: str) -> list[dict[str, Any]]:
         logger.warning("Could not read %s: %s", path, exc, extra={"category": "DATA"})
     return rows
 
+
 # ---------------------------- sensor polling --------------------------------
 session = requests.Session()
 session.headers.update({"User-Agent": "PySmartHome-PC/3.0"})
@@ -382,11 +432,59 @@ def poll_board(board: str) -> None:
                 "consecutive_failures": 0,
             })
         logger.info("%s → %.2f°C / %.1f%% • %d ms", BOARDS[board]["name"], temperature, humidity, latency, extra={"category": "POLL"})
+    except requests.Timeout:
+        with state_lock:
+            sensors[board]["last_error"] = "timeout"
+            sensors[board]["consecutive_failures"] += 1
+        logger.warning(
+            "%s timeout after %ds • consecutive_failures=%d",
+            BOARDS[board]["name"],
+            HTTP_TIMEOUT,
+            sensors[board]["consecutive_failures"],
+            extra={"category": "POLL"}
+        )
+    except requests.ConnectionError as exc:
+        with state_lock:
+            sensors[board]["last_error"] = str(exc)
+            sensors[board]["consecutive_failures"] += 1
+        logger.warning(
+            "%s connection error • consecutive_failures=%d",
+            BOARDS[board]["name"],
+            sensors[board]["consecutive_failures"],
+            extra={"category": "POLL"}
+        )
+    except requests.HTTPError as exc:
+        with state_lock:
+            sensors[board]["last_error"] = str(exc)
+            sensors[board]["consecutive_failures"] += 1
+        logger.warning(
+            "%s HTTP error %s • consecutive_failures=%d",
+            BOARDS[board]["name"],
+            exc.response.status_code if exc.response else "unknown",
+            sensors[board]["consecutive_failures"],
+            extra={"category": "POLL"}
+        )
+    except (ValueError, KeyError) as exc:
+        with state_lock:
+            sensors[board]["last_error"] = str(exc)
+            sensors[board]["consecutive_failures"] += 1
+        logger.error(
+            "%s invalid payload: %s • consecutive_failures=%d",
+            BOARDS[board]["name"],
+            exc,
+            sensors[board]["consecutive_failures"],
+            extra={"category": "POLL"}
+        )
     except Exception as exc:
         with state_lock:
             sensors[board]["last_error"] = str(exc)
             sensors[board]["consecutive_failures"] += 1
-        logger.warning("%s unavailable • %s", BOARDS[board]["name"], exc, extra={"category": "POLL"})
+        logger.exception(
+            "%s unexpected error • consecutive_failures=%d",
+            BOARDS[board]["name"],
+            sensors[board]["consecutive_failures"],
+            extra={"category": "POLL"}
+        )
 
 
 def poll_all() -> None:
@@ -396,6 +494,7 @@ def poll_all() -> None:
         runtime["last_poll"] = iso_now()
         runtime["poll_cycles"] += 1
 
+
 # ----------------------------- github sync ----------------------------------
 def github_enabled() -> bool:
     return bool(GITHUB_TOKEN)
@@ -403,7 +502,7 @@ def github_enabled() -> bool:
 
 def github_put(path: str, content: str, message: str) -> None:
     if not github_enabled():
-        raise RuntimeError("PYSMART_GITHUB_TOKEN is not configured")
+        raise RuntimeError("GitHub token is not configured")
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
     headers = {
         "Accept": "application/vnd.github+json",
@@ -497,6 +596,7 @@ def publish_to_github_once() -> bool:
         logger.error("GitHub publish failed • %s", exc, extra={"category": "SYNC"})
         return False
 
+
 # ---------------------------- background worker -----------------------------
 def worker_loop() -> None:
     next_publish = 0.0
@@ -521,10 +621,30 @@ def start_worker() -> None:
     threading.Thread(target=worker_loop, name="pysmarthome-worker", daemon=True).start()
     logger.info("Background worker started • poll=%ss • publish=%ss", POLL_INTERVAL, PUBLISH_INTERVAL, extra={"category": "SYS"})
 
+
 # ------------------------------- flask --------------------------------------
 app = Flask(__name__)
 
 ALLOWED_PUBLIC_FILES = {"index.html", "app.js", "style.css"}
+
+
+@app.before_request
+def check_api_auth():
+    """Check API key for protected endpoints."""
+    if not API_KEY:
+        return None  # Auth disabled if no API key configured
+    if request.path in PROTECTED_ENDPOINTS:
+        provided_key = request.headers.get("X-API-Key", "")
+        if provided_key != API_KEY:
+            logger.warning(
+                "Unauthorized access attempt to %s from %s",
+                request.path,
+                request.remote_addr,
+                extra={"category": "AUTH"}
+            )
+            return jsonify({"error": "unauthorized", "message": "Invalid or missing X-API-Key header"}), 401
+    return None
+
 
 @app.after_request
 def headers(response):
@@ -552,6 +672,7 @@ def api_health():
         "timezone": "Asia/Tehran",
         "github_sync_enabled": github_enabled(),
         "worker_started": worker_started,
+        "api_auth_enabled": bool(API_KEY),
     })
 
 
@@ -672,5 +793,7 @@ if __name__ == "__main__":
     logger.info("Iran time zone: Asia/Tehran (UTC+03:30)", extra={"category": "TIME"})
     logger.info("GitHub sync: %s", "enabled" if github_enabled() else "disabled", extra={"category": "SYNC"})
     logger.info("Outage reference: today 13:00–15:00 • Friday skipped", extra={"category": "OUTAGE"})
+    logger.info("Log file: %s (5MB rotation, 3 backups)", log_file, extra={"category": "SYS"})
+    logger.info("API auth: %s", "enabled" if API_KEY else "disabled", extra={"category": "AUTH"})
     start_worker()
     app.run(host=HOST, port=PORT, debug=False, threaded=True)
