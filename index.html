@@ -4,6 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#07111f">
+  <meta name="application-name" content="PySmartHome-PC">
+  <meta name="color-scheme" content="dark light">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://mehrdadmb2.github.io; connect-src 'self' https://github-page-insights-worker.game-developer-mb.workers.dev; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="description" content="PySmartHome-PC real-time home IoT monitoring dashboard">
   <title>PySmartHome • Smart Home Control Center</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
@@ -24,7 +31,12 @@
         <strong id="iran-clock">--:--:--</strong>
         <span id="iran-date">----</span>
       </div>
-      <button class="icon-button" id="theme-toggle" type="button" title="Toggle theme" aria-label="Toggle theme">☼</button>
+      <label class="theme-picker-label" for="theme-select"><span class="sr-only">Color theme</span>
+        <select class="theme-select" id="theme-select" title="Choose a color theme" aria-label="Choose a color theme">
+          <option value="midnight">Midnight</option><option value="cyberpunk">Cyberpunk</option><option value="ocean">Ocean</option><option value="aurora">Aurora</option><option value="forest">Forest</option><option value="sunset">Sunset</option><option value="candy">Candy</option><option value="retro">Retro CRT</option><option value="matrix">Matrix</option><option value="light">Light</option>
+        </select>
+      </label>
+      <button class="icon-button" id="theme-toggle" type="button" title="Cycle color theme" aria-label="Cycle color theme">◐</button>
       <button class="icon-button" id="fullscreen-btn" type="button" title="Fullscreen" aria-label="Fullscreen">⛶</button>
     </div>
   </header>
@@ -145,9 +157,24 @@
       <div class="section-heading"><div><span class="eyebrow">RAW TELEMETRY</span><h3>Recent measurements</h3></div><button class="outline-button" id="view-table-btn" type="button">▤ View table</button></div>
       <div class="table-wrap"><table><thead><tr><th>Date</th><th>Time</th><th>Node</th><th>Temperature</th><th>Humidity</th></tr></thead><tbody id="data-table-body"></tbody></table><div class="table-empty hidden" id="table-empty">No measurements for this selection.</div></div>
     </section>
+
+    <section class="file-manager glass-panel hidden" id="file-manager" aria-labelledby="file-manager-title">
+      <div class="section-heading">
+        <div><span class="eyebrow">LOCAL DATA CONTROL</span><h3 id="file-manager-title">Data file manager</h3><p class="heading-note">Inspect, download, import, or remove sensor CSV history. This panel is disabled on the public static site.</p></div>
+        <button class="outline-button" id="refresh-files-btn" type="button">↻ Refresh files</button>
+      </div>
+      <div class="file-manager-tools">
+        <label class="file-input-wrap" for="upload-file"><span>Choose sensor CSV</span><input id="upload-file" type="file" accept=".csv,text/csv"></label>
+        <label class="overwrite-option"><input type="checkbox" id="overwrite-file"> Replace file if it already exists</label>
+        <button class="primary-button" id="upload-file-btn" type="button">↑ Upload CSV</button>
+        <label class="admin-key-wrap" for="admin-key"><span>LAN admin key (only needed for remote writes)</span><input id="admin-key" type="password" autocomplete="off" placeholder="Optional server admin key"></label>
+      </div>
+      <div class="file-manager-status" id="files-status" role="status" aria-live="polite">Loading data files…</div>
+      <div class="file-list" id="file-list"><div class="file-empty">Sensor history files will appear here.</div></div>
+    </section>
   </main>
 
-  <footer class="site-footer"><span>PySmartHome-PC</span><span>•</span><span>Iran Time • Asia/Tehran • UTC+03:30</span><span>•</span><span id="footer-status">Ready</span></footer>
+  <footer class="site-footer"><span>PySmartHome-PC</span><span>•</span><span>Iran Time • Asia/Tehran • UTC+03:30</span><span>•</span><a href="https://mehrdadmb2.github.io/github-page-insights/" target="_blank" rel="noopener noreferrer">VISIT ANALYTICS DASHBOARD ↗</a><span>•</span><span id="footer-status">Ready</span></footer>
 
   <div class="toast-stack" id="toast-stack"></div>
 
@@ -170,6 +197,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
-  <script src="app.js"></script>
+  <script src="bg.js" defer></script>
+  <script src="app.js" defer></script>
+  <script src="analytics-loader.js" defer></script>
 </body>
 </html>

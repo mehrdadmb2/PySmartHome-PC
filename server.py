@@ -13,6 +13,12 @@ import json
 import logging
 import math
 import os
+import re
+import hmac
+import ipaddress
+import shutil
+import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -20,23 +26,86 @@ from typing import Any
 
 import requests
 from flask import Flask, jsonify, request, send_from_directory
+from werkzeug.utils import secure_filename
 
-BASE_DIR = Path(__file__).resolve().parent
+# In a PyInstaller build, persistent data/config belongs beside the executable,
+# while immutable application assets live in the bundled resource directory.
+FROZEN = bool(getattr(sys, "frozen", False))
+BASE_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
+ASSET_DIR = Path(getattr(sys, "_MEIPASS", BASE_DIR)).resolve()
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# ----------------------------- configuration --------------------------------
-HOST = os.getenv("PYSMART_HOME_HOST", "0.0.0.0")
-try:
-    PORT = int(os.getenv("PYSMART_HOME_PORT", "5000"))
-except ValueError:
-    PORT = 5000
 
-POLL_INTERVAL = max(3, int(os.getenv("PYSMART_HOME_POLL_SECONDS", "10")))
-PUBLISH_INTERVAL = max(30, int(os.getenv("PYSMART_HOME_PUBLISH_SECONDS", "300")))
-NODE_TIMEOUT = max(20, int(os.getenv("PYSMART_HOME_NODE_TIMEOUT", "45")))
-HTTP_TIMEOUT = max(1, int(os.getenv("PYSMART_HOME_HTTP_TIMEOUT", "4")))
-TEMP_ALERT_THRESHOLD = float(os.getenv("PYSMART_TEMP_ALERT", "35"))
+def load_local_env(path: Path) -> None:
+    """Read a tiny .env file without overriding explicitly exported variables."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key.replace("_", "").isalnum():
+            os.environ.setdefault(key, value)
+
+
+def local_config_value(key: str) -> str:
+    """Read a named value from the git-ignored legacy config.txt, if present."""
+    try:
+        lines = (BASE_DIR / "config.txt").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, sep, value = line.partition(" ")
+        if sep and name.strip().lower() == key.lower():
+            candidate = value.strip().strip('"').strip("'")
+            if candidate and "YOUR_" not in candidate and not candidate.lower().startswith("replace_"):
+                return candidate
+    return ""
+
+
+load_local_env(BASE_DIR / ".env")
+
+
+def env_int(name: str, default: int, minimum: int, maximum: int | None = None) -> int:
+    try:
+        value = int(os.getenv(name, str(default)).strip())
+    except (TypeError, ValueError):
+        value = default
+    value = max(minimum, value)
+    return min(maximum, value) if maximum is not None else value
+
+
+def env_float(name: str, default: float, minimum: float, maximum: float | None = None) -> float:
+    try:
+        value = float(os.getenv(name, str(default)).strip())
+        if not math.isfinite(value):
+            value = default
+    except (TypeError, ValueError):
+        value = default
+    value = max(minimum, value)
+    return min(maximum, value) if maximum is not None else value
+
+# ----------------------------- configuration --------------------------------
+# Secure-by-default local operation. Set PYSMART_HOME_HOST=0.0.0.0 to allow LAN clients.
+HOST = os.getenv("PYSMART_HOME_HOST", "127.0.0.1").strip() or "127.0.0.1"
+PORT = env_int("PYSMART_HOME_PORT", 5000, 1, 65535)
+POLL_INTERVAL = env_int("PYSMART_HOME_POLL_SECONDS", 10, 3, 3600)
+PUBLISH_INTERVAL = env_int("PYSMART_HOME_PUBLISH_SECONDS", 300, 30, 86400)
+NODE_TIMEOUT = env_int("PYSMART_HOME_NODE_TIMEOUT", 45, 20, 86400)
+HTTP_TIMEOUT = env_int("PYSMART_HOME_HTTP_TIMEOUT", 4, 1, 60)
+TEMP_ALERT_THRESHOLD = env_float("PYSMART_TEMP_ALERT", 35.0, -40.0, 100.0)
+API_ADMIN_KEY = os.getenv("PYSMART_HOME_ADMIN_KEY", "").strip()
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+SENSOR_CSV_RE = re.compile(r"^(esp32_1|esp32_s3)_([0-9]{4}-[0-9]{2}-[0-9]{2})\.csv$")
 
 ESP32_HUB_URL = os.getenv("PYSMART_ESP32_1_URL", "http://192.168.1.119/api/status")
 ESP32_S3_URL = os.getenv("PYSMART_ESP32_S3_URL", "http://192.168.1.115/api/status")
@@ -44,7 +113,7 @@ ESP32_S3_URL = os.getenv("PYSMART_ESP32_S3_URL", "http://192.168.1.115/api/statu
 GITHUB_USER = os.getenv("PYSMART_GITHUB_USER", "mehrdadmb2")
 GITHUB_REPO = os.getenv("PYSMART_GITHUB_REPO", "PySmartHome-PC")
 GITHUB_BRANCH = os.getenv("PYSMART_GITHUB_BRANCH", "main")
-GITHUB_TOKEN = os.getenv("PYSMART_GITHUB_TOKEN", "").strip()
+GITHUB_TOKEN = os.getenv("PYSMART_GITHUB_TOKEN", "").strip() or local_config_value("token")
 
 BOARDS = {
     "esp32_1": {"name": "Room 1 • Hub", "short": "Room 1", "url": ESP32_HUB_URL},
@@ -421,7 +490,16 @@ def github_put(path: str, content: str, message: str) -> None:
             "branch": GITHUB_BRANCH,
         }
         if existing.status_code == 200:
-            sha = existing.json().get("sha")
+            current = existing.json()
+            # The Contents API creates a commit on every PUT. Avoid noisy commits
+            # when the generated snapshot did not change.
+            try:
+                stored = base64.b64decode(current.get("content", "")).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                stored = None
+            if stored == content:
+                return
+            sha = current.get("sha")
             if sha:
                 payload["sha"] = sha
         response = session.put(url, headers=headers, json=payload, timeout=HTTP_TIMEOUT + 5)
@@ -523,8 +601,81 @@ def start_worker() -> None:
 
 # ------------------------------- flask --------------------------------------
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES + 1024 * 1024
 
-ALLOWED_PUBLIC_FILES = {"index.html", "app.js", "style.css"}
+ALLOWED_PUBLIC_FILES = {
+    "index.html", "app.js", "style.css", "bg.js", "sw.js",
+    "manifest.webmanifest", "icon.svg", "analytics-loader.js",
+}
+ALLOWED_DATA_JSON = {"status.json", "outage_schedule.json"}
+
+
+def is_loopback_request() -> bool:
+    address = request.remote_addr or ""
+    try:
+        return ipaddress.ip_address(address).is_loopback
+    except ValueError:
+        return address.lower() == "localhost"
+
+
+def mutation_is_authorized() -> bool:
+    # Loopback access is trusted for normal single-PC operation. If the server
+    # is LAN-exposed, remote write operations require a configured admin key.
+    if is_loopback_request():
+        return True
+    supplied = request.headers.get("X-Admin-Key", "")
+    return bool(API_ADMIN_KEY and supplied and hmac.compare_digest(supplied, API_ADMIN_KEY))
+
+
+def is_sensor_csv_name(filename: str) -> bool:
+    match = SENSOR_CSV_RE.fullmatch(filename)
+    if not match:
+        return False
+    try:
+        dt.date.fromisoformat(match.group(2))
+        return True
+    except ValueError:
+        return False
+
+
+def validate_sensor_csv(raw: bytes) -> tuple[bool, str]:
+    if not raw:
+        return False, "The uploaded CSV is empty."
+    if len(raw) > MAX_UPLOAD_BYTES:
+        return False, "The CSV exceeds the 5 MiB upload limit."
+    try:
+        decoded = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return False, "CSV must be UTF-8 encoded."
+    try:
+        reader = csv.DictReader(decoded.splitlines())
+        headers = {str(h or "").strip().lower() for h in (reader.fieldnames or [])}
+        if not {"time", "temperature", "humidity"}.issubset(headers):
+            return False, "CSV must contain time, temperature, and humidity columns."
+        count = 0
+        for row in reader:
+            if not row or not any(row.values()):
+                continue
+            normalized = {str(key or "").strip().lower(): value for key, value in row.items()}
+            count += 1
+            if count > 150000:
+                return False, "The CSV has too many rows (limit: 150,000)."
+            try:
+                time_value = str(normalized.get("time", "")).strip()
+                dt.datetime.strptime(time_value, "%H:%M:%S")
+                temperature = float(normalized.get("temperature", ""))
+                humidity = float(normalized.get("humidity", ""))
+                if not math.isfinite(temperature) or not -40 <= temperature <= 100:
+                    return False, f"Invalid temperature in row {count + 1}."
+                if not math.isfinite(humidity) or not 0 <= humidity <= 100:
+                    return False, f"Invalid humidity in row {count + 1}."
+            except (ValueError, TypeError):
+                return False, f"Invalid measurement in row {count + 1}."
+        if count == 0:
+            return False, "CSV does not contain any measurements."
+    except csv.Error as exc:
+        return False, f"CSV parsing failed: {exc}"
+    return True, "ok"
 
 @app.after_request
 def headers(response):
@@ -539,7 +690,9 @@ def headers(response):
 
 @app.get("/")
 def root():
-    return send_from_directory(BASE_DIR, "index.html")
+    response = send_from_directory(ASSET_DIR, "index.html")
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.get("/api/health")
@@ -547,12 +700,42 @@ def api_health():
     return jsonify({
         "ok": True,
         "service": "PySmartHome-PC",
-        "schema_version": 3,
+        "version": "4.0.0",
+        "schema_version": 4,
         "time": iso_now(),
         "timezone": "Asia/Tehran",
         "github_sync_enabled": github_enabled(),
         "worker_started": worker_started,
+        "mode": "frozen" if FROZEN else "python",
     })
+
+
+@app.get("/api/diagnostics")
+def api_diagnostics():
+    try:
+        disk = shutil.disk_usage(DATA_DIR)
+        disk_status = {"total_bytes": disk.total, "free_bytes": disk.free, "used_bytes": disk.used}
+    except OSError:
+        disk_status = None
+    with state_lock:
+        return jsonify({
+            "version": "4.0.0",
+            "generated_at": iso_now(),
+            "uptime_seconds": max(0, int(time.time() - runtime["started_at"])),
+            "poll_cycles": runtime["poll_cycles"],
+            "last_poll": runtime["last_poll"],
+            "last_publish": runtime["last_publish"],
+            "publish_ok": runtime["last_publish_ok"],
+            "publish_error": runtime["publish_error"],
+            "host": HOST,
+            "port": PORT,
+            "poll_interval_seconds": POLL_INTERVAL,
+            "publish_interval_seconds": PUBLISH_INTERVAL,
+            "node_timeout_seconds": NODE_TIMEOUT,
+            "github_sync_enabled": github_enabled(),
+            "admin_key_configured": bool(API_ADMIN_KEY),
+            "disk": disk_status,
+        })
 
 
 @app.get("/api/dashboard")
@@ -629,6 +812,8 @@ def api_outage():
 
 @app.post("/api/outage/update")
 def api_outage_update():
+    if not mutation_is_authorized():
+        return jsonify({"error": "remote write access is locked; configure PYSMART_HOME_ADMIN_KEY and send X-Admin-Key"}), 403
     payload = request.get_json(silent=True) or {}
     date_value = payload.get("date")
     start = payload.get("start")
@@ -652,25 +837,123 @@ def api_datetime():
     })
 
 
+@app.get("/api/files")
+def api_files():
+    """List permitted data files. No arbitrary filesystem paths are exposed."""
+    files = []
+    try:
+        for path in DATA_DIR.iterdir():
+            if not path.is_file():
+                continue
+            if not (is_sensor_csv_name(path.name) or path.name in ALLOWED_DATA_JSON):
+                continue
+            stat = path.stat()
+            files.append({
+                "name": path.name,
+                "size_bytes": stat.st_size,
+                "modified_at": dt.datetime.fromtimestamp(stat.st_mtime, IRAN_TZ).isoformat(timespec="seconds"),
+                "kind": "csv" if path.suffix.lower() == ".csv" else "json",
+                "deletable": is_sensor_csv_name(path.name),
+            })
+    except OSError as exc:
+        return jsonify({"error": f"could not list data files: {exc}"}), 500
+    files.sort(key=lambda item: item["name"], reverse=True)
+    return jsonify({"count": len(files), "files": files})
+
+
+@app.get("/api/download")
+def api_download():
+    filename = secure_filename(request.args.get("name", ""))
+    if not (is_sensor_csv_name(filename) or filename in ALLOWED_DATA_JSON):
+        return jsonify({"error": "file is not available for download"}), 400
+    path = DATA_DIR / filename
+    if not path.is_file():
+        return jsonify({"error": "file not found"}), 404
+    return send_from_directory(DATA_DIR, filename, as_attachment=True, conditional=True)
+
+
+@app.post("/api/upload")
+def api_upload():
+    if not mutation_is_authorized():
+        return jsonify({"error": "remote write access is locked; configure PYSMART_HOME_ADMIN_KEY and send X-Admin-Key"}), 403
+    uploaded = request.files.get("file")
+    if uploaded is None or not uploaded.filename:
+        return jsonify({"error": "choose a CSV file first"}), 400
+    filename = secure_filename(uploaded.filename)
+    if not is_sensor_csv_name(filename):
+        return jsonify({"error": "filename must match esp32_1_YYYY-MM-DD.csv or esp32_s3_YYYY-MM-DD.csv"}), 400
+    raw = uploaded.read(MAX_UPLOAD_BYTES + 1)
+    valid, reason = validate_sensor_csv(raw)
+    if not valid:
+        return jsonify({"error": reason}), 400
+    destination = DATA_DIR / filename
+    overwrite = request.form.get("overwrite", "false").lower() in {"1", "true", "yes", "on"}
+    if destination.exists() and not overwrite:
+        return jsonify({"error": "file already exists; enable overwrite to replace it"}), 409
+    temp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="wb", prefix=".upload-", suffix=".tmp", dir=DATA_DIR, delete=False) as fh:
+            temp_name = fh.name
+            fh.write(raw)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temp_name, destination)
+    except OSError as exc:
+        if temp_name:
+            try:
+                Path(temp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+        return jsonify({"error": f"could not save file: {exc}"}), 500
+    return jsonify({"ok": True, "name": filename, "size_bytes": len(raw)}), 201
+
+
+@app.delete("/api/files/<path:filename>")
+def api_delete_file(filename: str):
+    if not mutation_is_authorized():
+        return jsonify({"error": "remote write access is locked; configure PYSMART_HOME_ADMIN_KEY and send X-Admin-Key"}), 403
+    safe = secure_filename(filename)
+    if safe != filename or not is_sensor_csv_name(safe):
+        return jsonify({"error": "only sensor CSV files can be deleted"}), 400
+    path = DATA_DIR / safe
+    if not path.is_file():
+        return jsonify({"error": "file not found"}), 404
+    try:
+        path.unlink()
+    except OSError as exc:
+        return jsonify({"error": f"could not delete file: {exc}"}), 500
+    return jsonify({"ok": True, "deleted": safe})
+
+
+@app.errorhandler(413)
+def request_too_large(_error):
+    return jsonify({"error": "request is too large; upload limit is 5 MiB"}), 413
+
+
 @app.route("/<path:path>")
 def public_files(path: str):
     if path in ALLOWED_PUBLIC_FILES:
-        return send_from_directory(BASE_DIR, path)
-    # Public data only; no arbitrary filesystem access.
+        response = send_from_directory(ASSET_DIR, path)
+        if path in {"index.html", "app.js", "style.css", "sw.js", "manifest.webmanifest"}:
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+    # Expose only the exact public data formats used by the static dashboard.
+    # Never serve arbitrary files that happen to be placed inside DATA_DIR.
     if path.startswith("data/"):
         relative = Path(path[5:])
-        if relative.name and all(part not in {".", ".."} for part in relative.parts):
-            return send_from_directory(DATA_DIR, relative.as_posix())
+        if len(relative.parts) == 1 and (is_sensor_csv_name(relative.name) or relative.name in ALLOWED_DATA_JSON):
+            return send_from_directory(DATA_DIR, relative.name)
     return jsonify({"error": "not found"}), 404
 
 
 if __name__ == "__main__":
     logger.info("PySmartHome-PC starting", extra={"category": "SYS"})
-    logger.info("Server: http://0.0.0.0:%s", PORT, extra={"category": "SYS"})
+    logger.info("Server: http://%s:%s", HOST, PORT, extra={"category": "SYS"})
     logger.info("Room 1 endpoint: %s", ESP32_HUB_URL, extra={"category": "CFG"})
     logger.info("Room 2 endpoint: %s", ESP32_S3_URL, extra={"category": "CFG"})
     logger.info("Iran time zone: Asia/Tehran (UTC+03:30)", extra={"category": "TIME"})
     logger.info("GitHub sync: %s", "enabled" if github_enabled() else "disabled", extra={"category": "SYNC"})
+    logger.info("Network exposure: %s", "LAN-enabled; protect the PC firewall and set an admin key" if HOST in {"0.0.0.0", "::"} else "local-only", extra={"category": "SEC"})
     logger.info("Outage reference: today 13:00–15:00 • Friday skipped", extra={"category": "OUTAGE"})
     start_worker()
     app.run(host=HOST, port=PORT, debug=False, threaded=True)

@@ -20,7 +20,10 @@
     lastData: [],
     requestSeq: 0,
     prevValues: {},
+    files: [],
   };
+
+  const THEMES = ['midnight','cyberpunk','ocean','aurora','forest','sunset','candy','retro','matrix','light'];
 
   const $ = (id) => document.getElementById(id);
   const qsa = (sel) => [...document.querySelectorAll(sel)];
@@ -312,8 +315,9 @@
         : await loadData(state.board, state.range, state.date);
       if (seq !== state.requestSeq) return;
       state.lastData = data;
-      $('chart-empty').classList.toggle('hidden', Boolean(data.length));
-      setText('chart-summary', data.length ? `${formatNumber(data.length)} samples • ${state.range}` : 'No data loaded');
+      const count = Array.isArray(data) ? data.length : (data.a.length + data.b.length);
+      $('chart-empty').classList.toggle('hidden', count > 0);
+      setText('chart-summary', count ? `${formatNumber(count)} samples • ${state.range}` : 'No data loaded');
       drawChart(data);
       updateInsights(data);
     } catch (error) {
@@ -331,7 +335,13 @@
   }
 
   function drawChart(payload) {
-    if (!window.Chart) return;
+    if (!window.Chart) {
+      setText('chart-summary', 'Chart library unavailable — readings, tables, and CSV export remain available.');
+      toggleClass('chart-empty', 'hidden', false);
+      return;
+    }
+    const count = Array.isArray(payload) ? payload.length : (payload.a.length + payload.b.length);
+    toggleClass('chart-empty', 'hidden', count > 0);
     const canvas = $('main-chart');
     if (state.chart) state.chart.destroy();
 
@@ -534,7 +544,7 @@
     const date = $('outage-date').value, start = $('outage-start').value, end = $('outage-end').value;
     if (!date || !start || !end) return;
     try {
-      const resp = await fetchWithTimeout('/api/outage/update', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date,start,end})}, 7000);
+      const resp = await fetchWithTimeout('/api/outage/update', {method:'POST',headers:adminHeaders({'Content-Type':'application/json'}),body:JSON.stringify({date,start,end})}, 7000);
       const data = await safeJson(resp);
       state.outage = {schedule:data.schedule,timezone:CONFIG.timezone};
       $('outage-modal').close(); renderOutageDays(); updateOutageCountdown();
@@ -569,7 +579,102 @@
     } catch (error) { showToast(`Export failed: ${error.message}`, 'error'); }
   }
 
-  function applyTheme(theme) { document.documentElement.dataset.theme = theme; localStorage.setItem('psh-theme',theme); }
+  function applyTheme(theme) {
+    const selected = THEMES.includes(theme) ? theme : 'midnight';
+    document.documentElement.dataset.theme = selected;
+    localStorage.setItem('psh-theme', selected);
+    if ($('theme-select')) $('theme-select').value = selected;
+  }
+
+  function adminHeaders(extra = {}) {
+    const headers = { ...extra };
+    const key = $('admin-key')?.value?.trim() || sessionStorage.getItem('psh-admin-key') || '';
+    if (key) headers['X-Admin-Key'] = key;
+    return headers;
+  }
+
+  function bytesLabel(bytes) {
+    const value = Number(bytes) || 0;
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+    return `${(value / (1024 * 1024)).toFixed(2)} MiB`;
+  }
+
+  async function refreshFiles() {
+    if (state.mode !== 'local') return;
+    setText('files-status', 'Refreshing the data directory…');
+    try {
+      const response = await fetchWithTimeout('/api/files', {}, 5000);
+      const payload = await safeJson(response);
+      state.files = Array.isArray(payload.files) ? payload.files : [];
+      renderFiles();
+      setText('files-status', `${state.files.length} permitted data file(s) • files are stored in the project's data/ folder.`);
+    } catch (error) {
+      setText('files-status', `Could not read files: ${error.message}`);
+      showToast(`File list failed: ${error.message}`, 'error');
+    }
+  }
+
+  function renderFiles() {
+    const list = $('file-list');
+    if (!list) return;
+    if (!state.files.length) {
+      list.innerHTML = '<div class="file-empty">No sensor CSV or published JSON files were found yet.</div>';
+      return;
+    }
+    list.innerHTML = state.files.map(file => {
+      const name = escapeHTML(file.name);
+      const modified = escapeHTML(file.modified_at || 'Unknown date');
+      const badge = file.kind === 'csv' ? 'CSV' : 'JSON';
+      const deleteButton = file.deletable ? `<button class="file-action danger" data-file-action="delete" data-file-name="${name}" type="button">Delete</button>` : '';
+      return `<article class="file-row"><span class="file-type">${badge}</span><div class="file-meta"><strong title="${name}">${name}</strong><small>${bytesLabel(file.size_bytes)} • ${modified}</small></div><div class="file-actions"><button class="file-action" data-file-action="download" data-file-name="${name}" type="button">Download</button>${deleteButton}</div></article>`;
+    }).join('');
+  }
+
+  async function uploadDataFile() {
+    const input = $('upload-file');
+    const file = input?.files?.[0];
+    if (!file) { showToast('Choose a sensor CSV file first.', 'error'); return; }
+    if (file.size > 5 * 1024 * 1024) { showToast('File exceeds the 5 MiB upload limit.', 'error'); return; }
+    const form = new FormData();
+    form.append('file', file);
+    if ($('overwrite-file')?.checked) form.append('overwrite', 'true');
+    setText('files-status', `Validating and uploading ${file.name}…`);
+    try {
+      const response = await fetchWithTimeout('/api/upload', { method: 'POST', headers: adminHeaders(), body: form }, 12000);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+      showToast(`Uploaded ${payload.name}.`, 'ok');
+      input.value = '';
+      await refreshFiles();
+    } catch (error) {
+      setText('files-status', `Upload failed: ${error.message}`);
+      showToast(`Upload failed: ${error.message}`, 'error');
+    }
+  }
+
+  async function handleFileAction(action, filename) {
+    if (action === 'download') {
+      window.location.assign(`/api/download?name=${encodeURIComponent(filename)}`);
+      return;
+    }
+    if (action !== 'delete' || !window.confirm(`Permanently delete ${filename}? This cannot be undone.`)) return;
+    try {
+      const response = await fetchWithTimeout(`/api/files/${encodeURIComponent(filename)}`, { method: 'DELETE', headers: adminHeaders() }, 7000);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+      showToast(`Deleted ${filename}.`, 'ok');
+      await refreshFiles();
+    } catch (error) {
+      showToast(`Delete failed: ${error.message}`, 'error');
+    }
+  }
+
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') return;
+    navigator.serviceWorker.register('./sw.js').catch(error => console.warn('Offline shell could not be enabled:', error));
+  }
 
   function updateClock() {
     const now = new Date();
@@ -587,7 +692,11 @@
 
   // ---- event binding ----
   function bindEvents() {
-    $('theme-toggle')?.addEventListener('click',()=>applyTheme((document.documentElement.dataset.theme||'midnight')==='midnight'?'light':'midnight'));
+    $('theme-toggle')?.addEventListener('click',()=>{
+      const current = document.documentElement.dataset.theme || 'midnight';
+      applyTheme(THEMES[(THEMES.indexOf(current) + 1) % THEMES.length]);
+    });
+    $('theme-select')?.addEventListener('change', event => applyTheme(event.target.value));
     $('fullscreen-btn')?.addEventListener('click',()=>document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.());
     $('board-select')?.addEventListener('change',e=>{state.board=e.target.value;renderChart();});
     $('chart-date')?.addEventListener('change',e=>{state.date=e.target.value||tehranDateISO();renderChart();});
@@ -601,6 +710,17 @@
     $('save-outage')?.addEventListener('click',saveOutage);
     $('outage-date')?.addEventListener('change',updateEndPreview); $('outage-start')?.addEventListener('change',updateEndPreview);
     $('close-data-modal')?.addEventListener('click',()=> $('data-modal').close());
+    $('refresh-files-btn')?.addEventListener('click', refreshFiles);
+    $('upload-file-btn')?.addEventListener('click', uploadDataFile);
+    $('admin-key')?.addEventListener('change', event => {
+      const key = event.target.value.trim();
+      if (key) sessionStorage.setItem('psh-admin-key', key);
+      else sessionStorage.removeItem('psh-admin-key');
+    });
+    $('file-list')?.addEventListener('click', event => {
+      const button = event.target.closest('[data-file-action]');
+      if (button) handleFileAction(button.dataset.fileAction, button.dataset.fileName);
+    });
     window.addEventListener('resize',()=>state.chart?.resize());
   }
 
@@ -611,7 +731,11 @@
     bindEvents(); updateClock(); setInterval(updateClock,1000);
     state.mode = await detectMode();
     setText('connection-text',state.mode==='local'?'LOCAL API':'PUBLIC SNAPSHOT');
+    toggleClass('file-manager', 'hidden', state.mode !== 'local');
+    if ($('admin-key')) $('admin-key').value = sessionStorage.getItem('psh-admin-key') || '';
+    registerServiceWorker();
     await Promise.all([refreshDashboard(),refreshOutage(),renderChart()]);
+    if (state.mode === 'local') await refreshFiles();
     setInterval(refreshDashboard,CONFIG.refreshMs);
     setInterval(refreshOutage,60000);
     setInterval(renderChart,30000);

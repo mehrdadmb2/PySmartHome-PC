@@ -1,6 +1,4 @@
-# LOCAL ONLY - copy this file to config.txt
-# Never commit config.txt to GitHub.
-# Accepted format:
-# token github_pat_XXXXXXXXXXXXXXXXXXXXXXXX
-
+# LOCAL ONLY - copy this file to config.txt. Never commit config.txt.
+# GitHub token with Contents: Read and write on only this repository.
+# Prefer PYSMART_GITHUB_TOKEN as an environment variable when possible.
 token YOUR_GITHUB_TOKEN_HERE

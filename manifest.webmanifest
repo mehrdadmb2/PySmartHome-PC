@@ -1,0 +1,17 @@
+{
+  "id": "./",
+  "name": "PySmartHome-PC — Smart Home Control Center",
+  "short_name": "PySmartHome",
+  "description": "Local-first ESP32 temperature and humidity monitoring with historical charts, diagnostics, and power-outage planning.",
+  "lang": "en",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#07111f",
+  "theme_color": "#07111f",
+  "categories": ["utilities", "productivity", "household"],
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

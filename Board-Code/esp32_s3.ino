@@ -9,8 +9,9 @@
 #include <DHT.h>
 #include <Adafruit_SSD1306.h>
 
-const char* ssid = ">><<>><<";
-const char* password = "MEHRdAd1380";
+// Set these values for your own Wi-Fi. Never commit real network credentials.
+const char* ssid = "YOUR_WIFI_SSID";
+const char* password = "YOUR_WIFI_PASSWORD";
 IPAddress localIP(192, 168, 1, 115);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
@@ -26,6 +27,7 @@ Adafruit_SSD1306 display(128, 32, &Wire, -1);
 WebServer server(80);
 
 float currentTemp = 0, currentHum = 0;
+bool sensorValid = false;
 
 void setup() {
   Serial.begin(115200);
@@ -45,15 +47,32 @@ void setup() {
   display.print("WiFi...");
   display.display();
 
-  WiFi.config(localIP, gateway, subnet);
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.config(localIP, gateway, subnet); // Adjust for your router or use DHCP instead.
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) delay(500);
+  const unsigned long wifiDeadline = millis() + 20000;
+  while (WiFi.status() != WL_CONNECTED && millis() < wifiDeadline) {
+    delay(250);
+    Serial.print('.');
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("\n[WiFi] Connection failed. Check Wi-Fi credentials/IP settings.");
+    display.clearDisplay(); display.setCursor(0, 12); display.print("WiFi failed"); display.display();
+    delay(5000);
+    ESP.restart();
+  }
   Serial.print("[WiFi] OK, IP: ");
   Serial.println(WiFi.localIP());
 
   dht.begin();
 
   server.on("/api/status", HTTP_GET, []() {
+    server.sendHeader("Cache-Control", "no-store");
+    if (!sensorValid) {
+      server.send(503, "application/json", "{\"error\":\"sensor_not_ready\"}");
+      return;
+    }
     String json = "{\"temp\":" + String(currentTemp, 1) + ",\"humidity\":" + String(currentHum, 1) + "}";
     server.send(200, "application/json", json);
   });
@@ -64,13 +83,19 @@ void setup() {
 
 void loop() {
   server.handleClient();
+  static unsigned long lastReconnect = 0;
+  if (WiFi.status() != WL_CONNECTED && millis() - lastReconnect >= 10000) {
+    lastReconnect = millis();
+    Serial.println("[WiFi] Disconnected; attempting reconnect...");
+    WiFi.reconnect();
+  }
   static unsigned long lastRead = 0;
   if (millis() - lastRead >= 5000) {
     lastRead = millis();
     float t = dht.readTemperature();
     float h = dht.readHumidity();
     if (!isnan(t) && !isnan(h)) {
-      currentTemp = t; currentHum = h;
+      currentTemp = t; currentHum = h; sensorValid = true;
       Serial.printf("[SENSOR] %.1f C, %.1f %%\n", t, h);
 
       display.clearDisplay();
