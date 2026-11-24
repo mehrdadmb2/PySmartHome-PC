@@ -34,9 +34,10 @@
 - [Capabilities](#capabilities)
 - [Architecture and data flow](#architecture-and-data-flow)
 - [Hardware and wiring](#hardware-and-wiring)
-- [OLED monitors and ArzPulse market prices](#oled-monitors-and-arzpulse-market-prices)
+- [OLED monitors and automated market snapshots](#oled-monitors-and-automated-market-snapshots)
 - [Software requirements](#software-requirements)
 - [Quick start on Windows](#quick-start-on-windows)
+- [Persian setup guide](راهنمای-راه‌اندازی-فارسی.md)
 - [Firmware setup](#firmware-setup)
 - [Configuration reference](#configuration-reference)
 - [Local, online, offline, and desktop modes](#local-online-offline-and-desktop-modes)
@@ -71,7 +72,7 @@ The project intentionally separates sensor firmware from the dashboard and serve
 
 - Supports an ESP32 hub (128×64 SSD1306) and an ESP32-S3 node (128×32 SSD1306) out of the box.
 - Both OLEDs show live DHT22 temperature/humidity and the two ArzPulse market values: USD/USDT-derived dollar rate and one gram of 18-karat gold, displayed in Toman.
-- Reads ArzPulse `docs/data/latest.json` over HTTPS and refreshes successful price snapshots every five minutes; temporary provider/network failures trigger bounded exponential retries (30 seconds up to five minutes) without intentionally rebooting the board.
+- Reads only a tiny local HTTP endpoint from the PC (`/api/market`). The PC retrieves the precomputed GitHub snapshot; neither board performs TLS, downloads the full ArzPulse feed, nor converts currencies.
 - Uses a compact four-card layout on the 128×64 display; the 128×32 display scrolls a boxed market ticker so neither full price is permanently truncated.
 - Retains the last in-memory market snapshot during a temporary network failure and marks aged/source-stale values with a `~` indicator.
 - Reads JSON from each node's `GET /api/status` endpoint.
@@ -128,8 +129,11 @@ The project intentionally separates sensor firmware from the dashboard and serve
 flowchart TD
     A[ESP32 Hub + DHT22 + OLED] -->|HTTP JSON /api/status| P[Python service on PC]
     B[ESP32-S3 + DHT22 + OLED] -->|HTTP JSON /api/status| P
-    M[ArzPulse public latest.json] -->|HTTPS GET every 5 minutes| A
-    M -->|HTTPS GET every 5 minutes| B
+    M[ArzPulse full latest.json] -->|HTTPS every 5 minutes| W[GitHub Actions updater]
+    W -->|Precomputed prices| R[market/ category snapshots]
+    R -->|PC fetches compact JSON| P
+    P -->|Local HTTP /api/market| A
+    P -->|Local HTTP /api/market| B
     P --> C[CSV history + status.json + outage_schedule.json]
     P --> D[Local dashboard / localhost]
     C --> E{Optional GitHub Contents API sync}
@@ -140,7 +144,7 @@ flowchart TD
     I --> J[GitHub Page Insights dashboard]
 ```
 
-The PC is the control and persistence point. ESP32 nodes do not upload sensor history directly to GitHub. If GitHub publishing is disabled or temporarily unavailable, local sensor collection continues. The boards independently read the public ArzPulse JSON snapshot only for their OLED market-price display; these values are not added to the PySmartHome-PC sensor CSV files.
+The PC is the control and persistence point. ESP32 nodes do not upload sensor history directly to GitHub. If GitHub publishing is disabled or temporarily unavailable, local sensor collection continues. Market collection is deliberately outside the microcontrollers: GitHub Actions reads ArzPulse's full source JSON, validates the two required values, converts them to Toman, and publishes small categorized files. The PC fetches only `market/esp32.json` in a background Python thread and serves a validated copy at `http://<PC-LAN-IP>:5000/api/market`. Both boards use plain HTTP on the trusted local LAN; they do not run TLS, parse the large ArzPulse feed, or calculate prices. Each board fetches the compact response in a low-priority FreeRTOS task, separate from its sensor/display loop.
 
 ## Hardware and wiring
 
@@ -171,29 +175,45 @@ The PC is the control and persistence point. ESP32 nodes do not upload sensor hi
 
 **Electrical note:** ESP32 GPIOs are 3.3 V logic. Check your exact board and sensor module wiring before powering it. Do not feed 5 V signals into an ESP32 GPIO. If your router uses a different subnet, change both firmware IP settings and the PC service URLs together, or change the firmware to DHCP and reserve addresses in the router.
 
-## OLED monitors and ArzPulse market prices
+## OLED monitors and automated market snapshots
 
-The two sketches are deliberately adapted to their display dimensions:
+The two sketches are adapted to their display dimensions:
 
 | Board | OLED | Layout |
 |---|---:|---|
-| ESP32 Hub (`esp32_hub.ino`) | 128×64 | Temperature and humidity cards, plus full dollar and one-gram 18K gold prices at the same time |
-| ESP32-S3 (`esp32_s3.ino`) | 128×32 | Temperature and humidity cards, plus a scrolling, bordered ticker containing both complete prices (dollar and 1g 18K gold) |
+| ESP32 Hub (`Board-Code/esp32_hub/esp32_hub.ino`) | 128×64 | Temperature and humidity cards, plus dollar and one-gram 18K gold prices |
+| ESP32-S3 (`Board-Code/esp32_s3/esp32_s3.ino`) | 128×32 | Temperature and humidity cards, plus a scrolling ticker containing both prices |
 
-### Price source and units
+### GitHub Actions market pipeline
 
-Both boards read the same public snapshot from:
+The workflow `.github/workflows/update-market-snapshot.yml` runs every five minutes and can also be started manually from **Actions → Update compact market snapshot → Run workflow**. It downloads the full source only on the GitHub-hosted runner, validates the source fields, converts IRR to Toman once, and writes these small outputs:
 
-`https://raw.githubusercontent.com/mehrdadmb2/ArzPulse/main/docs/data/latest.json`
+| Repository path | Purpose |
+|---|---|
+| `market/currencies/usd.json` | Categorized USD/USDT reference rate in Toman |
+| `market/metals/gold_18k_1g.json` | 18-karat gold price per gram in Toman |
+| `market/esp32.json` | Minimal combined payload used by both boards (two integer prices and stale flags) |
+| `market/status.json` | Snapshot generation time, source age, and output size |
 
-The firmware uses the top-level `dollarPrice` and `gold18K` fields. ArzPulse stores these values in **Iranian rials (IRR)**, so each is divided by 10 before it is displayed as **Toman**:
+The PC service reads this small file from GitHub:
 
-- **Dollar:** `dollarPrice / 10` — ArzPulse's USDT/IRR market rate, used as the dollar-rate proxy.
-- **18K gold (1 gram):** `gold18K / 10` — ArzPulse's derived price for one gram of 18-karat gold.
+`https://raw.githubusercontent.com/mehrdadmb2/PySmartHome-PC/main/market/esp32.json`
 
-This is a display integration, not a separate price calculation or an independent quote provider. If ArzPulse marks a derived value as stale, or the board has not received a successful snapshot for ten minutes, the value is prefixed with `~`. A temporary fetch failure does not erase the last successful values. Failed fetches alternate between the GitHub Raw endpoint and the GitHub Pages mirror, with bounded exponential retries (30 seconds, 60 seconds, 120 seconds, then up to five minutes). After a successful fetch, the normal refresh interval is five minutes.
+The ESP32 boards do **not** contact that URL. They read the PC's local endpoint instead:
 
-The ESP32-S3 has limited vertical space, so its lower ticker scrolls horizontally. The 128×64 hub shows both prices simultaneously. Price requests use bounded connection/read timeouts, explicit JSON/identity-encoding headers, a cache-busting query parameter, and a filtered ArduinoJson document with a larger memory budget. The firmware alternates between the Raw and Pages endpoints on successive failed attempts instead of running two TLS handshakes in one loop pass. This limits blocking time and helps avoid task-watchdog starvation on unstable networks.
+`http://<PC-LAN-IP>:5000/api/market`
+
+That file contains no charts, history, other coins, or calculation inputs. The Action performs the IRR-to-Toman conversion (`IRR / 10`) and stale-source validation before publishing. The ESP32 receives only two ready-to-display integer values. The updater validates all required values before writing, so a failed source request leaves the last known-good snapshots untouched.
+
+**One-time GitHub setting:** open the repository's **Settings → Actions → General → Workflow permissions**, select **Read and write permissions**, and save. No personal access token or additional GitHub secret is required; the workflow uses the repository-provided `GITHUB_TOKEN`. Scheduled runs only operate on the default branch. After uploading the project, run the workflow manually once and confirm that `market/esp32.json` has been created before expecting the OLED ticker to show prices.
+
+### PC proxy and firmware network isolation
+
+The Python service fetches the compact snapshot from GitHub every 60 seconds by default. It validates the version, price values, timestamp, and 512-byte size limit before replacing the in-memory cache. A failed fetch preserves the last good snapshot. The local endpoint `/api/market` returns that cache; `/api/health` on the PC reports proxy readiness, cache age, and the last proxy error.
+
+The ESP32 makes a plain HTTP request to the PC over the trusted home LAN. That request runs in a low-priority FreeRTOS task pinned to the network core—not inside `loop()`. The task uses a fixed 384-byte ArduinoJson document, rejects unexpectedly large responses, applies short connection/read timeouts, and retries with backoff (30 seconds up to five minutes). It does not establish TLS, perform currency conversion, or parse the full ArzPulse JSON. The last good values remain in memory during temporary failures. The board compares the snapshot's `updated_at` marker before refreshing its freshness timer, so repeatedly receiving an unchanged old cache does not make stale prices look fresh.
+
+**PC LAN setup is required for prices:** set `PYSMART_HOME_HOST=0.0.0.0` in the PC's local `.env`, restart the service, reserve or identify the PC's LAN IP, and allow inbound TCP port 5000 only on the trusted Private network in Windows Firewall. Change `192.168.1.100` in both sketches to the actual PC LAN IP. Do not expose port 5000 to the public internet. If the PC service is down, the boards continue sensor/display operation but cannot receive new market prices.
 
 ### OLED and board recovery behaviour
 
@@ -201,7 +221,7 @@ The ESP32-S3 has limited vertical space, so its lower ticker scrolls horizontall
 - A failed Wi-Fi connection no longer forces repeated ESP32 reboots. The board keeps sampling the sensor and retries the network connection.
 - DHT22 readings are sampled every 2.5 seconds. Invalid readings do not overwrite the last valid sample.
 - `/api/status` returns HTTP 503 until a valid sensor sample exists or when that sample becomes older than 20 seconds. The Python collector can therefore distinguish a real reading from a missing/stale sensor.
-- `/api/health` reports Wi-Fi, sensor, OLED and market-feed readiness, the last HTTP status/error, and the age of the last successful price snapshot for direct diagnostics.
+- `/api/health` reports Wi-Fi, sensor, OLED and market-feed readiness, the last HTTP status/error, snapshot age/time, free heap, minimum free heap, and reset reason.
 
 **Important:** the firmware placeholders `YOUR_WIFI_SSID` and `YOUR_WIFI_PASSWORD` must be replaced before uploading. The default static IP addresses remain `192.168.1.119` (hub) and `192.168.1.115` (S3), matching the Python service defaults shown below.
 
@@ -225,8 +245,8 @@ Python dependencies are listed in `requirements.txt`:
 - DHT sensor library (Adafruit).
 - Adafruit SSD1306.
 - Adafruit GFX Library (dependency of SSD1306).
-- ArduinoJson 6.21.x (used with a deserialization filter so the large ArzPulse document does not need to be loaded into RAM in full).
-- ESP32 core libraries: `WiFi`, `WebServer`, `HTTPClient`, and `WiFiClientSecure` (included with the Espressif Arduino core).
+- ArduinoJson 6.21.5 (parses only the fixed-schema compact snapshot using a 384-byte static document).
+- ESP32 core libraries: `WiFi`, `WebServer`, `HTTPClient`, `WiFiClient`, and `Wire` (included with the Espressif Arduino core).
 
 The current firmware does not require NTPClient. Install the Adafruit and ArduinoJson packages through Arduino IDE → Library Manager, and install the ESP32 platform through Boards Manager.
 
@@ -265,7 +285,13 @@ The current firmware does not require NTPClient. Install the Adafruit and Arduin
 
 ### Run on the local network
 
-The server binds to `127.0.0.1` by default for safety. To let other devices on the same trusted LAN open the dashboard, set `PYSMART_HOME_HOST=0.0.0.0` in `.env`, restart the service, and allow the port through the PC firewall only for your trusted private network. Do **not** port-forward port 5000 to the public internet.
+The server binds to `127.0.0.1` by default for safety. To let ESP32 boards access the PC market proxy, set `PYSMART_HOME_HOST=0.0.0.0` in `.env`, restart the service, and allow TCP port 5000 only on your trusted Windows Private network. In an elevated PowerShell window, create the rule with:
+
+```powershell
+New-NetFirewallRule -DisplayName "PySmartHome-PC LAN" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 5000 -Profile Private
+```
+
+Remove it later with `Remove-NetFirewallRule -DisplayName "PySmartHome-PC LAN"`. Do **not** port-forward port 5000 to the public internet.
 
 If other LAN devices need to edit the outage schedule, upload/delete CSVs, configure `PYSMART_HOME_ADMIN_KEY` to a long random value and enter that value in the dashboard's **LAN admin key** field. Read-only dashboard/file listing requires no key. Local loopback writes continue to work without the admin key.
 
@@ -275,8 +301,8 @@ If other LAN devices need to edit the outage schedule, upload/delete CSVs, confi
 
 Open the required sketch in Arduino IDE:
 
-- `Board-Code/esp32_hub.ino` for the ESP32 hub.
-- `Board-Code/esp32_s3.ino` for the ESP32-S3 node.
+- `Board-Code/esp32_hub/esp32_hub.ino` for the ESP32 hub.
+- `Board-Code/esp32_s3/esp32_s3.ino` for the ESP32-S3 node.
 
 In each sketch, replace:
 
@@ -305,9 +331,9 @@ In Arduino IDE → Library Manager, install:
 1. **DHT sensor library** by Adafruit.
 2. **Adafruit SSD1306**.
 3. **Adafruit GFX Library**.
-4. **ArduinoJson 6.21.x**.
+4. **ArduinoJson 6.21.5**.
 
-Install the Espressif **esp32** platform through Boards Manager. `WiFi`, `WebServer`, `HTTPClient`, `WiFiClientSecure` and `Wire` are supplied by that platform.
+Install the Espressif **esp32** platform through Boards Manager. `WiFi`, `WebServer`, `HTTPClient`, `WiFiClient` and `Wire` are supplied by that platform.
 
 ### 3. Check pins and upload
 
@@ -320,7 +346,7 @@ Install the Espressif **esp32** platform through Boards Manager. `WiFi`, `WebSer
 | OLED size | 128×64 | 128×32 |
 | HTTP endpoint | `http://192.168.1.119/api/status` | `http://192.168.1.115/api/status` |
 
-Select the correct ESP32 board and COM port, compile, and upload. Open Serial Monitor at **115200 baud**. The boot log reports the ESP32 reset reason and free heap, I²C devices, OLED readiness, Wi-Fi connection attempts, DHT22 samples, ArzPulse endpoint selection, HTTP status, JSON parsing outcome, and the last successful prices.
+Select the correct ESP32 board and COM port, compile, and upload. Open Serial Monitor at **115200 baud**. The boot log reports the ESP32 reset reason and free heap, I²C devices, OLED readiness, Wi-Fi connection attempts, DHT22 samples, background snapshot-task startup, HTTP status, JSON parsing outcome, and the last successful prices.
 
 ### 4. Verify the nodes from the PC
 
@@ -353,11 +379,11 @@ The values above are illustrative only. Actual values come from the latest ArzPu
 
 ### Firmware resilience and diagnostics
 
-- The firmware does not intentionally restart merely because Wi-Fi, the DHT22, the OLED, or ArzPulse is unavailable. The boot log prints `esp_reset_reason()` so a power/brownout reset or watchdog reset can be distinguished from an ordinary startup.
+- The firmware does not intentionally restart merely because Wi-Fi, the DHT22, the OLED, the PC market proxy, or ArzPulse is unavailable. The boot log prints `esp_reset_reason()` so a power/brownout reset or watchdog reset can be distinguished from an ordinary startup.
 - Wi-Fi reconnection is attempted periodically. Sensor sampling and the local HTTP service continue while network recovery is in progress.
-- Failed OLED initialization is retried, and Serial Monitor reports the discovered I²C addresses.
-- ArzPulse is fetched every five minutes after a successful response. A failed request/parse alternates the Raw and Pages endpoints and uses bounded exponential backoff from 30 seconds up to five minutes; the most recent successful prices remain in RAM and are marked stale when appropriate.
-- The public ArzPulse feed is read-only and requires no API token. The firmware currently uses `WiFiClientSecure::setInsecure()` for this public endpoint to avoid certificate-expiry/root-CA maintenance on the microcontroller. No secret is sent, but HTTPS server certificates are not validated by the board. Keep the device on a trusted network and use a pinned/root CA approach if cryptographic source authentication is required.
+- Failed OLED initialization is retried, and Serial Monitor reports whether the OLED is found at `0x3C` or `0x3D`.
+- GitHub Actions parses the large ArzPulse source and publishes small category files. The PC retrieves only `market/esp32.json`, validates it, caches the last good copy, and serves it at `/api/market` over the trusted LAN.
+- The boards use `WiFiClient` and plain local HTTP only; they do not use TLS or make requests to GitHub. Failed requests use bounded exponential backoff; the most recent successful prices remain in RAM and become stale if the snapshot timestamp stops changing.
 
 ### Important hardware note
 
@@ -366,6 +392,22 @@ If the OLED remains physically blank even during boot, the screen itself cannot 
 ### Node response
 
 The Python collector accepts the firmware's `temp` key and the clearer `temperature` alias, alongside `humidity`. The endpoint is designed for a trusted private LAN; it is not an internet-facing authenticated API.
+
+## GitHub Actions setup for market prices
+
+1. Push the project to the `main` branch.
+2. Open **Settings → Actions → General → Workflow permissions** and enable **Read and write permissions**.
+3. Open **Actions → Update compact market snapshot → Run workflow** and run it once.
+4. Confirm that `market/esp32.json` and the categorized files appear in the repository.
+5. The scheduled workflow then refreshes the data every five minutes. No PAT, API key, or Cloudflare Worker is required for this feature.
+6. On the PC, copy `.env.example` to `.env` and set `PYSMART_HOME_HOST=0.0.0.0`. Restart the service. Allow inbound TCP 5000 only on the Windows Private profile.
+7. Find the PC's LAN IPv4 address with `ipconfig`. Replace `192.168.1.100` in both firmware sketches with that address, then verify `http://<PC-LAN-IP>:5000/api/market` from a browser on the LAN returns the compact JSON. The ESP32s will use this local endpoint, not GitHub directly.
+
+If a scheduled run fails, the last successful market JSON files are preserved. On the OLED, a `~` prefix indicates that the source marked a quote stale or that the board has not observed a newer snapshot for ten minutes.
+
+### When the board becomes completely unresponsive
+
+The price request no longer runs in the main loop, so a market timeout should not stop DHT sampling or OLED refresh. If the whole board still locks (including its local `/api/health` endpoint), treat it as a separate system-level fault: temporarily disconnect the OLED and DHT22, use a short known-good USB cable and a stable regulated 5 V supply, then test the board alone. Reconnect one peripheral at a time. Inspect the Serial Monitor reset reason and minimum heap. If the physical RESET button also has no effect, check the board's supply, USB cable/port, reset circuit, and any peripheral short; firmware cannot repair a hardware power or reset-line fault.
 
 ## Configuration reference
 
@@ -381,6 +423,9 @@ Environment variables override built-in defaults. A `.env` file in the project/e
 | `PYSMART_HOME_PUBLISH_SECONDS` | `300` | GitHub publish interval, constrained to 30–86400 seconds |
 | `PYSMART_HOME_NODE_TIMEOUT` | `45` | Seconds after a successful sample before a node is stale/offline |
 | `PYSMART_HOME_HTTP_TIMEOUT` | `4` | HTTP request timeout for sensor calls |
+| `PYSMART_MARKET_SOURCE_URL` | PySmartHome-PC raw GitHub URL | Compact market snapshot source fetched by the PC |
+| `PYSMART_MARKET_REFRESH_SECONDS` | `60` | PC market-cache refresh interval |
+| `PYSMART_MARKET_HTTP_TIMEOUT` | `5` | PC market-fetch timeout |
 | `PYSMART_TEMP_ALERT` | `35` | Temperature alert threshold in °C |
 | `PYSMART_GITHUB_USER` | `mehrdadmb2` | GitHub owner |
 | `PYSMART_GITHUB_REPO` | `PySmartHome-PC` | Repository to publish to |
@@ -569,19 +614,23 @@ Both board firmwares expose `GET /api/health`. In addition to the Wi-Fi, sensor 
 
 - `price_http`: last HTTP status (negative values indicate client setup errors; `0` means no request has completed yet).
 - `price_error`: short reason for the last failed request or `OK`.
-- `price_age_ms`: milliseconds since the last successful ArzPulse snapshot (`0` before the first successful fetch).
+- `price_age_ms`: milliseconds since the last new market snapshot (`0` before the first successful fetch).
+- `price_updated_at`: `updated_at` marker from the compact file.
+- `free_heap` and `min_free_heap`: current and minimum free internal heap reported by the ESP32 runtime.
+- `reset_reason`: reset cause reported by the ESP32 runtime.
 
-The S3 ticker shows the last known prices when available. Before the first successful fetch, it shows a short connection/error status instead of remaining indefinitely on a generic “waiting” message. The firmware keeps the last good price values on transient failures.
+The S3 ticker shows the last known prices when available. Before the first successful fetch, it shows a short connection/error status. The firmware keeps the last good price values on transient failures and only resets the freshness timer when the snapshot's `updated_at` changes.
 
 ## Troubleshooting
 
 | Symptom | Likely cause | What to check |
 |---|---|---|
-| OLED is completely blank | OLED power, common GND, SDA/SCL wiring, wrong GPIOs/address, or failed display module | Open Serial Monitor at 115200; inspect the I²C scan and `[OLED]` initialization lines. The firmware tries `0x3C` and `0x3D` and retries initialization. |
+| OLED is completely blank | OLED power, common GND, SDA/SCL wiring, wrong GPIOs/address, or failed display module | Open Serial Monitor at 115200; inspect the I²C scan and `[OLED]` initialization lines. The firmware probes only `0x3C` and `0x3D` (to avoid a long full-bus scan if an I²C line is stuck) and retries initialization. |
 | OLED shows Wi-Fi retry/offline | Placeholder/incorrect SSID or password, 5 GHz-only network, wrong static subnet/gateway, or weak signal | Set the real 2.4 GHz Wi-Fi credentials; check `NODE_IP`, gateway and subnet in the sketch. The firmware retries without rebooting. |
 | Board is connected but appears offline in PySmartHome-PC | The board IP does not match the PC URL, PC firewall/network isolation, or DHT22 has not produced a fresh reading | Open the exact `/api/status` URL from the PC. Match `192.168.1.119` / `192.168.1.115` to the two `PYSMART_ESP32_*_URL` settings. |
-| ArzPulse price shows `--` | No Internet access, raw GitHub unavailable, invalid JSON, or no first successful price snapshot since boot | Check Serial Monitor for `[ArzPulse]` messages. The board alternates Raw/Pages endpoints and retries with bounded backoff; local sensor readings continue. Check `/api/health` for `price_http`, `price_error`, and `price_age_ms`. |
-| ArzPulse price shows `~` | ArzPulse marks the derived quote stale, or the node has not refreshed its snapshot for more than ten minutes | Check the `derivedStale` flags and `timestamp` in ArzPulse `docs/data/latest.json`; the marker is intentional and does not mean the numeric value is zero. |
+| Market price shows `--` | The Action has not run, the PC cache is empty, the PC proxy is not LAN-accessible, or the snapshot is invalid | Run the market Action. Confirm `market/esp32.json` exists, check PC `http://127.0.0.1:5000/api/health` (`market_proxy_ready`), then open `http://<PC-LAN-IP>:5000/api/market` from the LAN. |
+| Market price shows `~` | ArzPulse marked the source stale, or the board has not observed a newer Action snapshot for more than ten minutes | Check `market/status.json` and the `stale` flags in the category files. If `updated_at` stops changing, check the Actions run history and repository Workflow permissions. |
+| Market request fails | PC service is not reachable from the board, the PC cache is empty, or the snapshot is not current | Check `PYSMART_HOME_HOST=0.0.0.0`, Windows Private-profile firewall, the PC LAN IP in both sketches, PC `/api/health`, and Serial Monitor `price_error`. The board's main loop does not perform market networking. |
 | Both nodes appear offline | Wrong IP/subnet, Wi-Fi credentials, disconnected node, or PC firewall | Open each node `/api/status` from the PC and inspect Serial Monitor |
 | Node endpoint responds with 503 | DHT22 has not produced a valid reading yet | Wiring, power, pull-up, GPIO, and sensor readiness |
 | The dashboard cannot use live data | Server is not running, wrong port, or opened as `file://` | Start the server and use `http://127.0.0.1:5000` |
@@ -599,12 +648,19 @@ The S3 ticker shows the last known prices when available. Before the first succe
 
 ```text
 PySmartHome-PC/
-├── .github/workflows/ci.yml       # GitHub Actions validation workflow
+├── .github/workflows/
+│   ├── ci.yml                     # Python tests and syntax validation
+│   ├── firmware-build.yml         # Arduino CLI compile checks for both boards
+│   └── update-market-snapshot.yml # Five-minute compact market feed updater
 ├── Board-Code/
-│   ├── esp32_hub.ino              # ESP32 Hub: 128x64 OLED + DHT22 + ArzPulse prices
-│   └── esp32_s3.ino               # ESP32-S3: 128x32 OLED + DHT22 + scrolling prices
+│   ├── esp32_hub/esp32_hub.ino    # ESP32 Hub: 128x64 OLED + DHT22
+│   └── esp32_s3/esp32_s3.ino      # ESP32-S3: 128x32 OLED + DHT22
+├── scripts/update_market_snapshot.py # ArzPulse normalization and category output
+├── market/                        # Small generated market JSON snapshots
 ├── data/                          # CSV history + status/schedule JSON
-├── tests/test_server.py           # Automated tests (no hardware required)
+├── tests/
+│   ├── test_server.py             # Local API and application tests
+│   └── test_market_snapshot.py    # Market conversion and validation tests
 ├── app.js                         # Dashboard behavior, charts, uploads, and themes
 ├── analytics-loader.js            # GitHub Pages-only Page Insights SDK loader
 ├── bg.js                          # Lightweight animated theme-aware background

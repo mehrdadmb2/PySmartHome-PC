@@ -20,7 +20,7 @@ def test_health_has_version_and_timezone(client):
     data = response.get_json()
     assert data["ok"] is True
     assert data["timezone"] == "Asia/Tehran"
-    assert data["version"] == "4.0.0"
+    assert data["version"] == "4.1.0"
 
 
 def test_sensor_payload_accepts_supported_firmware_keys():
@@ -112,3 +112,109 @@ def test_public_data_route_only_serves_allowed_data_files(client, tmp_path, monk
     )
     assert client.get("/data/private.txt").status_code == 404
     assert client.get("/data/esp32_1_2026-10-20.csv").status_code == 200
+
+
+def test_market_snapshot_validator_accepts_compact_schema():
+    payload = {
+        "v": 1,
+        "updated_at": "2026-11-24T12:00:00Z",
+        "usd_toman": 1_000_000,
+        "gold18k_toman": 50_000_000,
+        "usd_stale": False,
+        "gold_stale": True,
+        "ignored_extra": "not passed to boards",
+    }
+    normalized = server.validate_market_snapshot(payload)
+    assert normalized["usd_toman"] == 1_000_000
+    assert normalized["gold_stale"] is True
+    assert "ignored_extra" not in normalized
+
+
+@pytest.mark.parametrize("payload", [
+    {"v": 2, "updated_at": "2026-11-24T12:00:00Z", "usd_toman": 10, "gold18k_toman": 20},
+    {"v": 1, "updated_at": "2026-11-24T12:00:00Z", "usd_toman": 0, "gold18k_toman": 20},
+    {"v": 1, "updated_at": "2026-11-24T12:00:00Z", "usd_toman": 10, "gold18k_toman": True},
+    {"v": 1, "updated_at": "", "usd_toman": 10, "gold18k_toman": 20},
+    {"v": 1, "updated_at": "not-a-timestamp", "usd_toman": 10, "gold18k_toman": 20},
+])
+def test_market_snapshot_validator_rejects_bad_payloads(payload):
+    with pytest.raises(ValueError):
+        server.validate_market_snapshot(payload)
+
+
+def test_market_endpoint_returns_503_until_cache_is_ready(client, monkeypatch):
+    monkeypatch.setattr(server, "market_snapshot", None)
+    monkeypatch.setattr(server, "market_snapshot_error", "not fetched yet")
+    response = client.get("/api/market")
+    assert response.status_code == 503
+    assert response.get_json()["error"] == "market_snapshot_not_ready"
+
+
+def test_market_endpoint_serves_compact_cached_payload(client, monkeypatch):
+    payload = {
+        "v": 1,
+        "updated_at": "2026-11-24T12:00:00Z",
+        "usd_toman": 1_000_000,
+        "gold18k_toman": 50_000_000,
+        "usd_stale": False,
+        "gold_stale": False,
+    }
+    monkeypatch.setattr(server, "market_snapshot", payload)
+    monkeypatch.setattr(server, "market_snapshot_fetched_at", server.time.time())
+    response = client.get("/api/market")
+    assert response.status_code == 200
+    assert response.get_json() == payload
+    assert response.headers["Cache-Control"].startswith("no-store")
+
+
+def test_market_refresh_keeps_last_good_cache_on_failure(monkeypatch):
+    old_payload = {
+        "v": 1,
+        "updated_at": "2026-11-24T11:00:00Z",
+        "usd_toman": 900_000,
+        "gold18k_toman": 45_000_000,
+        "usd_stale": False,
+        "gold_stale": False,
+    }
+    monkeypatch.setattr(server, "market_snapshot", old_payload.copy())
+
+    def fail_request(*args, **kwargs):
+        raise server.requests.Timeout("simulated timeout")
+
+    monkeypatch.setattr(server.requests, "get", fail_request)
+    assert server.refresh_market_snapshot_once() is False
+    assert server.market_snapshot == old_payload
+    assert "simulated timeout" in server.market_snapshot_error
+
+
+def test_market_refresh_updates_cache_from_small_json(monkeypatch):
+    import json
+
+    payload = {
+        "v": 1,
+        "updated_at": "2026-11-24T12:00:00Z",
+        "usd_toman": 1_100_000,
+        "gold18k_toman": 55_000_000,
+        "usd_stale": False,
+        "gold_stale": False,
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+    class FakeResponse:
+        def __init__(self):
+            self.headers = {"Content-Length": str(len(raw))}
+            self.raw = io.BytesIO(raw)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(server.requests, "get", lambda *args, **kwargs: FakeResponse())
+    assert server.refresh_market_snapshot_once() is True
+    assert server.market_snapshot == payload
+    assert server.market_snapshot_fetched_at > 0

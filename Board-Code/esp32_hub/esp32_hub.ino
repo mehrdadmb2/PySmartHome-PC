@@ -5,13 +5,15 @@
  * 1) Set WIFI_SSID / WIFI_PASSWORD below before flashing.
  * 2) Keep the static IPs aligned with PYSMART_ESP32_1_URL and
  *    PYSMART_ESP32_S3_URL in the PC configuration.
- * 3) Market prices are fetched from the public ArzPulse latest.json file.
+ * 3) GitHub Actions precomputes a tiny market JSON; a low-priority task fetches it.
  */
 
 #include <WiFi.h>
 #include <WebServer.h>
 #include <HTTPClient.h>
-#include <WiFiClientSecure.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <WiFiClient.h>
 #include <DHT.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -55,8 +57,11 @@ static const uint32_t PRICE_RETRY_MS = 30UL * 1000UL;
 static const uint32_t PRICE_RETRY_MAX_MS = 5UL * 60UL * 1000UL;
 static const uint32_t PRICE_STALE_MS = 10UL * 60UL * 1000UL;
 
-static const char* ARZPULSE_URL =
-    "https://raw.githubusercontent.com/mehrdadmb2/ArzPulse/main/docs/data/latest.json";
+// Set this to the LAN IPv4 address of the PC running server.py.
+// Example: http://192.168.1.100:5000/api/market
+// The board talks to the PC over plain local HTTP; the PC fetches GitHub over HTTPS.
+static const char* MARKET_SNAPSHOT_URL =
+    "http://192.168.1.100:5000/api/market";
 
 DHT dht(DHT_PIN, DHT_TYPE);
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
@@ -70,18 +75,6 @@ bool sensorEverValid = false;
 uint32_t lastSensorSuccessAt = 0;
 uint32_t lastSensorAttemptAt = 0;
 
-uint64_t dollarToman = 0;
-uint64_t gold18KToman = 0;
-bool dollarValid = false;
-bool goldValid = false;
-bool dollarSourceStale = true;
-bool goldSourceStale = true;
-uint32_t lastPriceSuccessAt = 0;
-uint32_t nextPriceFetchAt = 0;
-uint8_t priceFailureCount = 0;
-int lastPriceHttpCode = 0;
-char lastPriceError[48] = "Not fetched yet";
-char marketTimestamp[28] = "";
 
 bool displayReady = false;
 uint32_t lastDisplayRetryAt = 0;
@@ -95,16 +88,19 @@ bool timeReached(uint32_t now, uint32_t target) {
 }
 
 void printI2CDevices() {
+  // Only probe the two documented SSD1306 addresses. A full 7-bit bus scan
+  // can take several seconds when an I2C line is held low by a faulty module.
+  Serial.println("[I2C] Probing OLED addresses...");
   uint8_t found = 0;
-  Serial.println("[I2C] Scanning bus...");
-  for (uint8_t address = 1; address < 127; ++address) {
+  const uint8_t addresses[] = {OLED_ADDRESS, OLED_ADDRESS_ALT};
+  for (uint8_t address : addresses) {
     Wire.beginTransmission(address);
     if (Wire.endTransmission() == 0) {
       Serial.printf("[I2C] Device found at 0x%02X\n", address);
       ++found;
     }
   }
-  if (found == 0) Serial.println("[I2C] No device found. Check SDA/SCL, power and GND.");
+  if (found == 0) Serial.println("[I2C] No OLED found at 0x3C/0x3D. Check SDA/SCL, power and GND.");
 }
 
 bool i2cAddressPresent(uint8_t address) {
@@ -167,15 +163,6 @@ void formatToman(uint64_t value, char* output, size_t outputSize) {
   output[out] = '\0';
 }
 
-bool dollarIsStale(uint32_t now) {
-  return !dollarValid || dollarSourceStale ||
-         (lastPriceSuccessAt == 0 || now - lastPriceSuccessAt > PRICE_STALE_MS);
-}
-
-bool goldIsStale(uint32_t now) {
-  return !goldValid || goldSourceStale ||
-         (lastPriceSuccessAt == 0 || now - lastPriceSuccessAt > PRICE_STALE_MS);
-}
 
 // -------------------------- Wi-Fi management --------------------------
 
@@ -233,35 +220,80 @@ void readSensorIfDue(uint32_t now) {
                 currentTemp, currentHumidity);
 }
 
-// ------------------------ ArzPulse price reader ------------------------
+// ---------------------- Compact market snapshot -----------------------
 
-bool fetchArzPulseFromUrl(const char* url, bool& gotDollar, bool& gotGold) {
-  gotDollar = false;
-  gotGold = false;
+struct MarketState {
+  uint64_t dollarToman;
+  uint64_t gold18KToman;
+  bool dollarValid;
+  bool goldValid;
+  bool dollarSourceStale;
+  bool goldSourceStale;
+  uint32_t lastSuccessAt;
+  int lastHttpCode;
+  char lastError[48];
+  char updatedAt[28];
+};
 
-  WiFiClientSecure tlsClient;
-  // Public read-only feed. TLS certificate validation is intentionally
-  // disabled for compatibility with ESP32 builds lacking a maintained CA bundle.
-  tlsClient.setInsecure();
-  tlsClient.setTimeout(4500);
+static MarketState marketState = {
+  0, 0, false, false, true, true, 0, 0, "Not fetched yet", ""
+};
+static portMUX_TYPE marketStateMux = portMUX_INITIALIZER_UNLOCKED;
+static TaskHandle_t marketTaskHandle = nullptr;
+
+void copyText(char* destination, size_t size, const char* source) {
+  if (!destination || size == 0) return;
+  snprintf(destination, size, "%s", source ? source : "");
+}
+
+MarketState getMarketState() {
+  MarketState snapshot;
+  portENTER_CRITICAL(&marketStateMux);
+  snapshot = marketState;
+  portEXIT_CRITICAL(&marketStateMux);
+  return snapshot;
+}
+
+void setMarketError(int httpCode, const char* message) {
+  char safeMessage[sizeof(marketState.lastError)];
+  copyText(safeMessage, sizeof(safeMessage), message);
+  portENTER_CRITICAL(&marketStateMux);
+  marketState.lastHttpCode = httpCode;
+  copyText(marketState.lastError, sizeof(marketState.lastError), safeMessage);
+  portEXIT_CRITICAL(&marketStateMux);
+}
+
+bool dollarIsStale(const MarketState& state, uint32_t now) {
+  return !state.dollarValid || state.dollarSourceStale ||
+         state.lastSuccessAt == 0 || now - state.lastSuccessAt > PRICE_STALE_MS;
+}
+
+bool goldIsStale(const MarketState& state, uint32_t now) {
+  return !state.goldValid || state.goldSourceStale ||
+         state.lastSuccessAt == 0 || now - state.lastSuccessAt > PRICE_STALE_MS;
+}
+
+bool fetchCompactMarketSnapshot() {
+  if (WiFi.status() != WL_CONNECTED) {
+    setMarketError(0, "WiFi offline");
+    return false;
+  }
+
+  WiFiClient localClient;
+  // This is a small HTTP request to the PC on the same LAN. The PC, not the
+  // ESP32, performs HTTPS/TLS and downloads the precomputed GitHub snapshot.
+  localClient.setTimeout(1200);
 
   HTTPClient http;
-  http.setConnectTimeout(3500);
-  http.setTimeout(4500);
+  http.setConnectTimeout(1200);
+  http.setTimeout(1500);
   http.setReuse(false);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.setUserAgent("PySmartHome-PC/2.2 ESP32");
+  http.setUserAgent("PySmartHome-PC/4.1 ESP32-market-client");
 
-  String requestUrl(url);
-  requestUrl += (requestUrl.indexOf('?') >= 0 ? "&" : "?");
-  requestUrl += "_=";
-  requestUrl += String(millis());
-
-  Serial.printf("[ArzPulse] GET %s\n", url);
-  if (!http.begin(tlsClient, requestUrl)) {
-    snprintf(lastPriceError, sizeof(lastPriceError), "HTTP begin failed");
-    lastPriceHttpCode = -1000;
-    Serial.println("[ArzPulse] HTTP begin failed.");
+  // The local Flask endpoint explicitly sends Cache-Control: no-store.
+  // Avoid dynamic URL construction so the repeated fetch does not fragment heap.
+  if (!http.begin(localClient, MARKET_SNAPSHOT_URL)) {
+    setMarketError(-1000, "HTTP begin failed");
     return false;
   }
 
@@ -271,130 +303,130 @@ bool fetchArzPulseFromUrl(const char* url, bool& gotDollar, bool& gotGold) {
   http.addHeader("Connection", "close");
 
   const int code = http.GET();
-  lastPriceHttpCode = code;
   if (code != HTTP_CODE_OK) {
-    snprintf(lastPriceError, sizeof(lastPriceError), "HTTP %d", code);
-    Serial.printf("[ArzPulse] HTTP %d: %s\n", code,
-                  http.errorToString(code).c_str());
+    char message[48];
+    snprintf(message, sizeof(message), "HTTP %d", code);
+    setMarketError(code, message);
     http.end();
     return false;
   }
 
   const int contentLength = http.getSize();
-  Serial.printf("[ArzPulse] HTTP 200, content-length=%d\n", contentLength);
-
-  // Filter the large ArzPulse snapshot down to only required fields. The
-  // previous 256-byte documents were too small for reliable nested filtering
-  // on ArduinoJson 6 and could silently fail with NoMemory/IncompleteInput.
-  DynamicJsonDocument filter(512);
-  filter["dollarPrice"] = true;
-  filter["gold18K"] = true;
-  filter["timestamp"] = true;
-  filter["derivedStale"]["dollar"] = true;
-  filter["derivedStale"]["gold18K"] = true;
-
-  DynamicJsonDocument document(1024);
-  if (filter.overflowed()) {
-    snprintf(lastPriceError, sizeof(lastPriceError), "JSON filter overflow");
+  if (contentLength > 512) {
+    setMarketError(code, "Snapshot too large");
     http.end();
     return false;
   }
 
-  DeserializationError error = deserializeJson(
+  // No filter and no heap-backed DynamicJsonDocument: the Action has already
+  // reduced the multi-kilobyte source to a small fixed-schema payload.
+  StaticJsonDocument<384> document;
+  DeserializationError parseError = deserializeJson(
       document, *http.getStreamPtr(),
-      DeserializationOption::Filter(filter),
-      DeserializationOption::NestingLimit(8));
+      DeserializationOption::NestingLimit(3));
   http.end();
 
-  if (error || document.overflowed()) {
-    snprintf(lastPriceError, sizeof(lastPriceError), "JSON parse: %.30s",
-             error ? error.c_str() : "NoMemory");
-    Serial.printf("[ArzPulse] JSON parse failed: %s (overflow=%s)\n",
-                  error ? error.c_str() : "none",
-                  document.overflowed() ? "yes" : "no");
+  if (parseError || document.overflowed()) {
+    char message[48];
+    snprintf(message, sizeof(message), "JSON %.34s",
+             parseError ? parseError.c_str() : "NoMemory");
+    setMarketError(code, message);
     return false;
   }
 
-  const double dollarIRR = document["dollarPrice"] | 0.0;
-  const double goldIRR = document["gold18K"] | 0.0;
-  const bool dollarStale = document["derivedStale"]["dollar"] | false;
-  const bool goldStale = document["derivedStale"]["gold18K"] | false;
-
-  if (isfinite(dollarIRR) && dollarIRR > 0.0 && dollarIRR < 1.0e15) {
-    dollarToman = static_cast<uint64_t>(llround(dollarIRR / 10.0));
-    dollarValid = true;
-    dollarSourceStale = dollarStale;
-    gotDollar = true;
-  }
-  if (isfinite(goldIRR) && goldIRR > 0.0 && goldIRR < 1.0e15) {
-    gold18KToman = static_cast<uint64_t>(llround(goldIRR / 10.0));
-    goldValid = true;
-    goldSourceStale = goldStale;
-    gotGold = true;
-  }
-
-  if (!gotDollar || !gotGold) {
-    snprintf(lastPriceError, sizeof(lastPriceError), "Missing/invalid price fields");
-    Serial.printf("[ArzPulse] Invalid fields: dollar=%s gold=%s\n",
-                  gotDollar ? "OK" : "missing", gotGold ? "OK" : "missing");
+  if ((document["v"] | 0) != 1) {
+    setMarketError(code, "Unsupported snapshot version");
     return false;
   }
 
-  const char* timestamp = document["timestamp"] | "";
-  snprintf(marketTimestamp, sizeof(marketTimestamp), "%s", timestamp);
+  const uint64_t dollar = document["usd_toman"].as<uint64_t>();
+  const uint64_t gold = document["gold18k_toman"].as<uint64_t>();
+  const bool dollarStale = document["usd_stale"] | true;
+  const bool goldStale = document["gold_stale"] | true;
+  const char* updatedAt = document["updated_at"] | "";
+
+  if (dollar == 0 || gold == 0 || !updatedAt || strlen(updatedAt) < 10) {
+    setMarketError(code, "Missing/invalid market values");
+    return false;
+  }
+
+  const uint32_t receivedAt = millis();
+  portENTER_CRITICAL(&marketStateMux);
+  // Do not refresh the freshness timer just because an unchanged, cached JSON
+  // file was downloaded again. If Actions stop updating, prices turn stale.
+  if (marketState.lastSuccessAt == 0 ||
+      strncmp(marketState.updatedAt, updatedAt, sizeof(marketState.updatedAt) - 1) != 0) {
+    marketState.lastSuccessAt = receivedAt;
+  }
+  marketState.dollarToman = dollar;
+  marketState.gold18KToman = gold;
+  marketState.dollarValid = true;
+  marketState.goldValid = true;
+  marketState.dollarSourceStale = dollarStale;
+  marketState.goldSourceStale = goldStale;
+  marketState.lastHttpCode = code;
+  copyText(marketState.lastError, sizeof(marketState.lastError), "OK");
+  copyText(marketState.updatedAt, sizeof(marketState.updatedAt), updatedAt);
+  portEXIT_CRITICAL(&marketStateMux);
+
+  Serial.printf("[Market] Snapshot OK | HTTP %d | bytes=%d | updated=%s | USD=%llu T | Gold18K=%llu T\n",
+                code, contentLength,
+                updatedAt,
+                static_cast<unsigned long long>(dollar),
+                static_cast<unsigned long long>(gold));
   return true;
 }
 
-uint32_t nextPriceRetryDelay() {
-  // Bounded exponential backoff: 30s, 60s, 120s, 240s, then 300s.
+uint32_t marketRetryDelay(uint8_t failures) {
   uint32_t delayMs = PRICE_RETRY_MS;
-  for (uint8_t i = 1; i < priceFailureCount && delayMs < PRICE_RETRY_MAX_MS; ++i) {
+  for (uint8_t i = 1; i < failures && delayMs < PRICE_RETRY_MAX_MS; ++i) {
     delayMs *= 2;
     if (delayMs > PRICE_RETRY_MAX_MS) delayMs = PRICE_RETRY_MAX_MS;
   }
   return delayMs;
 }
 
-bool refreshMarketPrices() {
-  if (WiFi.status() != WL_CONNECTED) {
-    snprintf(lastPriceError, sizeof(lastPriceError), "WiFi offline");
-    return false;
+void marketPriceTask(void* parameter) {
+  uint8_t failures = 0;
+  for (;;) {
+    if (WiFi.status() != WL_CONNECTED) {
+      setMarketError(0, "WiFi offline");
+      vTaskDelay(pdMS_TO_TICKS(5000));
+      continue;
+    }
+
+    const bool ok = fetchCompactMarketSnapshot();
+    uint32_t waitMs;
+    if (ok) {
+      failures = 0;
+      waitMs = PRICE_REFRESH_MS;
+    } else {
+      if (failures < 10) ++failures;
+      waitMs = marketRetryDelay(failures);
+      const MarketState state = getMarketState();
+      Serial.printf("[Market] Fetch failed: %s | retry in %lu ms | main loop is unaffected\n",
+                    state.lastError, static_cast<unsigned long>(waitMs));
+    }
+    vTaskDelay(pdMS_TO_TICKS(waitMs));
   }
+}
 
-  bool gotDollar = false;
-  bool gotGold = false;
-
-  // Alternate endpoints between retries instead of performing two TLS
-  // handshakes in one loop pass. This limits blocking time and reduces the
-  // chance of starving the ESP32 task watchdog on weak/unstable networks.
-  const bool usePagesMirror = (priceFailureCount % 2U) == 1U;
-  const char* endpoint = usePagesMirror
-      ? "https://mehrdadmb2.github.io/ArzPulse/data/latest.json"
-      : "https://raw.githubusercontent.com/mehrdadmb2/ArzPulse/main/docs/data/latest.json";
-  Serial.printf("[ArzPulse] Endpoint route: %s\n",
-                usePagesMirror ? "GitHub Pages mirror" : "GitHub Raw");
-  const bool ok = fetchArzPulseFromUrl(endpoint, gotDollar, gotGold);
-
-  if (!ok) {
-    if (priceFailureCount < 10) ++priceFailureCount;
-    Serial.printf("[ArzPulse] Endpoint attempt failed. Keeping last good values. Retry in %lu ms. Cause: %s\n",
-                  static_cast<unsigned long>(nextPriceRetryDelay()), lastPriceError);
-    return false;
+void startMarketPriceTask() {
+  const BaseType_t result = xTaskCreatePinnedToCore(
+      marketPriceTask,
+      "market-fetch",
+      6144,
+      nullptr,
+      1,
+      &marketTaskHandle,
+      0);
+  if (result != pdPASS) {
+    marketTaskHandle = nullptr;
+    setMarketError(-2000, "Task creation failed");
+    Serial.println("[Market] Could not create fetch task; sensor/display loop stays active.");
+  } else {
+    Serial.println("[Market] Background fetch task started (core 0, low priority).");
   }
-
-  priceFailureCount = 0;
-  lastPriceSuccessAt = millis();
-  snprintf(lastPriceError, sizeof(lastPriceError), "OK");
-
-  char dollarText[24] = "--";
-  char goldText[24] = "--";
-  formatToman(dollarToman, dollarText, sizeof(dollarText));
-  formatToman(gold18KToman, goldText, sizeof(goldText));
-  Serial.printf("[ArzPulse] SUCCESS | USD %s Toman | 18K gold 1g %s Toman | source stale=%s/%s\n",
-                dollarText, goldText,
-                dollarSourceStale ? "yes" : "no",
-                goldSourceStale ? "yes" : "no");
-  return true;
 }
 
 // ---------------------------- HTTP service ----------------------------
@@ -412,6 +444,7 @@ void configureHttpServer() {
     const uint32_t now = millis();
     const bool sensorFresh = sensorEverValid &&
         (now - lastSensorSuccessAt <= SENSOR_STALE_MS);
+    const MarketState market = getMarketState();
 
     if (!sensorFresh) {
       server.send(503, "application/json",
@@ -421,13 +454,13 @@ void configureHttpServer() {
 
     char dollarValue[24] = "null";
     char goldValue[24] = "null";
-    if (dollarValid) {
+    if (market.dollarValid) {
       snprintf(dollarValue, sizeof(dollarValue), "%llu",
-               static_cast<unsigned long long>(dollarToman));
+               static_cast<unsigned long long>(market.dollarToman));
     }
-    if (goldValid) {
+    if (market.goldValid) {
       snprintf(goldValue, sizeof(goldValue), "%llu",
-               static_cast<unsigned long long>(gold18KToman));
+               static_cast<unsigned long long>(market.gold18KToman));
     }
 
     const String ip = WiFi.localIP().toString();
@@ -440,8 +473,8 @@ void configureHttpServer() {
         currentTemp, currentTemp, currentHumidity,
         static_cast<unsigned long>(now - lastSensorSuccessAt),
         ip.c_str(), dollarValue, goldValue,
-        dollarIsStale(now) ? "true" : "false",
-        goldIsStale(now) ? "true" : "false");
+        dollarIsStale(market, now) ? "true" : "false",
+        goldIsStale(market, now) ? "true" : "false");
 
     server.send(200, "application/json", json);
   });
@@ -451,20 +484,24 @@ void configureHttpServer() {
     const uint32_t now = millis();
     const bool sensorFresh = sensorEverValid &&
         (now - lastSensorSuccessAt <= SENSOR_STALE_MS);
+    const MarketState market = getMarketState();
 
-    char json[384];
+    char json[512];
     snprintf(json, sizeof(json),
         "{\"node\":\"esp32_hub\",\"wifi\":%s,\"sensor_valid\":%s,"
         "\"oled_ready\":%s,\"dollar_valid\":%s,\"gold_valid\":%s,"
         "\"ip\":\"%s\",\"price_http\":%d,\"price_error\":\"%s\","
-        "\"price_age_ms\":%lu}",
+        "\"price_age_ms\":%lu,\"price_updated_at\":\"%s\","
+        "\"free_heap\":%u,\"min_free_heap\":%u,\"reset_reason\":%d}",
         WiFi.status() == WL_CONNECTED ? "true" : "false",
         sensorFresh ? "true" : "false",
         displayReady ? "true" : "false",
-        dollarValid ? "true" : "false",
-        goldValid ? "true" : "false",
-        WiFi.localIP().toString().c_str(), lastPriceHttpCode,
-        lastPriceError, lastPriceSuccessAt ? (now - lastPriceSuccessAt) : 0UL);
+        market.dollarValid ? "true" : "false",
+        market.goldValid ? "true" : "false",
+        WiFi.localIP().toString().c_str(), market.lastHttpCode,
+        market.lastError, market.lastSuccessAt ? (now - market.lastSuccessAt) : 0UL,
+        market.updatedAt, ESP.getFreeHeap(), ESP.getMinFreeHeap(),
+        static_cast<int>(esp_reset_reason()));
     server.send(200, "application/json", json);
   });
 
@@ -517,18 +554,19 @@ void renderDisplay() {
     display.print("--");
   }
 
-  // Market prices are shown in Toman. '*' means the source marked the
-  // derived price stale or the last successful snapshot is over 10 minutes old.
+  // Market prices are precomputed by GitHub Actions and downloaded as a
+  // tiny snapshot in a background task. The display loop never performs I/O.
+  const MarketState market = getMarketState();
   char dollarText[24] = "--";
   char goldText[24] = "--";
-  if (dollarValid) formatToman(dollarToman, dollarText, sizeof(dollarText));
-  if (goldValid) formatToman(gold18KToman, goldText, sizeof(goldText));
+  if (market.dollarValid) formatToman(market.dollarToman, dollarText, sizeof(dollarText));
+  if (market.goldValid) formatToman(market.gold18KToman, goldText, sizeof(goldText));
 
   display.drawRoundRect(1, 31, 126, 14, 3, SSD1306_WHITE);
   display.setCursor(5, 35);
   display.print("USD ");
-  if (dollarValid) {
-    if (dollarIsStale(now)) display.print("~");
+  if (market.dollarValid) {
+    if (dollarIsStale(market, now)) display.print("~");
     display.print(dollarText);
     display.print(" T");
   } else {
@@ -538,8 +576,8 @@ void renderDisplay() {
   display.drawRoundRect(1, 48, 126, 15, 3, SSD1306_WHITE);
   display.setCursor(5, 52);
   display.print("1g18K ");
-  if (goldValid) {
-    if (goldIsStale(now)) display.print("~");
+  if (market.goldValid) {
+    if (goldIsStale(market, now)) display.print("~");
     display.print(goldText);
     display.print(" T");
   } else {
@@ -563,6 +601,7 @@ void setup() {
 
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
   Wire.setClock(100000);
+  Wire.setTimeOut(50);
   printI2CDevices();
   beginDisplay();
 
@@ -571,8 +610,9 @@ void setup() {
 
   startWiFi();
   configureHttpServer();
+  startMarketPriceTask();
 
-  Serial.println("[BOOT] Ready. No automatic reboot on Wi-Fi, DHT or OLED errors.");
+  Serial.println("[BOOT] Ready. Market networking runs outside the sensor/display loop.");
 }
 
 // --------------------------------- Loop --------------------------------
@@ -586,15 +626,6 @@ void loop() {
 
   maintainWiFi(now);
   readSensorIfDue(now);
-
-  if (WiFi.status() == WL_CONNECTED &&
-      (nextPriceFetchAt == 0 || timeReached(now, nextPriceFetchAt))) {
-    const bool priceOk = refreshMarketPrices();
-    // Process any request that arrived while the bounded HTTPS fetch was active.
-    server.handleClient();
-    nextPriceFetchAt = millis() +
-        (priceOk ? PRICE_REFRESH_MS : nextPriceRetryDelay());
-  }
 
   if (!displayReady && now - lastDisplayRetryAt >= DISPLAY_RETRY_MS) {
     lastDisplayRetryAt = now;

@@ -21,3 +21,8 @@ Remote clients can read the dashboard and allowed data files. Non-loopback clien
 ## Reporting
 
 Please avoid posting live credentials, network details, or sensitive telemetry in public issues. Rotate any exposed credential first, then report the issue with a sanitized reproduction and the affected version.
+
+
+## ESP32 market proxy on the local network
+
+When ESP32 nodes need the `/api/market` endpoint, the Python service must bind to a LAN-accessible interface (for example `PYSMART_HOME_HOST=0.0.0.0`). Restrict the Windows Firewall inbound rule for TCP 5000 to the trusted Private profile and do not forward this port from the internet. The market endpoint is read-only and contains public quote values; administrative write endpoints continue to require loopback or `PYSMART_HOME_ADMIN_KEY`. The board-to-PC HTTP request is intentionally local-LAN only; do not expose it on an untrusted network.

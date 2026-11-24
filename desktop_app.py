@@ -23,7 +23,7 @@ logger = logging.getLogger("pysmarthome.desktop")
 
 def run_server() -> None:
     server.start_worker()
-    server.app.run(host="127.0.0.1", port=server.PORT, debug=False, threaded=True, use_reloader=False)
+    server.app.run(host=server.HOST, port=server.PORT, debug=False, threaded=True, use_reloader=False)
 
 
 def wait_for_server(timeout: float = 20.0) -> bool:

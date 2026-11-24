@@ -12,7 +12,7 @@
     platformName: 'PySmartHome-PC GitHub Pages',
     platformType: 'web',
     environment: 'production',
-    appVersion: '4.0.0',
+    appVersion: '4.1.0',
     advancedTelemetry: false,
     trackPageLeave: false,
     trackClicks: false,

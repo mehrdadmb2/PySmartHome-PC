@@ -102,6 +102,12 @@ POLL_INTERVAL = env_int("PYSMART_HOME_POLL_SECONDS", 10, 3, 3600)
 PUBLISH_INTERVAL = env_int("PYSMART_HOME_PUBLISH_SECONDS", 300, 30, 86400)
 NODE_TIMEOUT = env_int("PYSMART_HOME_NODE_TIMEOUT", 45, 20, 86400)
 HTTP_TIMEOUT = env_int("PYSMART_HOME_HTTP_TIMEOUT", 4, 1, 60)
+MARKET_REFRESH_SECONDS = env_int("PYSMART_MARKET_REFRESH_SECONDS", 60, 15, 3600)
+MARKET_HTTP_TIMEOUT = env_int("PYSMART_MARKET_HTTP_TIMEOUT", 5, 2, 30)
+MARKET_SOURCE_URL = os.getenv(
+    "PYSMART_MARKET_SOURCE_URL",
+    "https://raw.githubusercontent.com/mehrdadmb2/PySmartHome-PC/main/market/esp32.json",
+).strip()
 TEMP_ALERT_THRESHOLD = env_float("PYSMART_TEMP_ALERT", 35.0, -40.0, 100.0)
 API_ADMIN_KEY = os.getenv("PYSMART_HOME_ADMIN_KEY", "").strip()
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
@@ -162,6 +168,11 @@ logger.propagate = False
 state_lock = threading.RLock()
 github_lock = threading.Lock()
 worker_started = False
+market_worker_started = False
+market_lock = threading.RLock()
+market_snapshot: dict[str, Any] | None = None
+market_snapshot_fetched_at = 0.0
+market_snapshot_error = "not fetched yet"
 
 sensors: dict[str, dict[str, Any]] = {
     key: {
@@ -575,6 +586,87 @@ def publish_to_github_once() -> bool:
         logger.error("GitHub publish failed • %s", exc, extra={"category": "SYNC"})
         return False
 
+# ----------------------------- market cache ---------------------------------
+def validate_market_snapshot(payload: Any) -> dict[str, Any]:
+    """Validate the small, versioned payload produced by the GitHub Action."""
+    if not isinstance(payload, dict) or payload.get("v") != 1:
+        raise ValueError("unsupported market snapshot schema")
+
+    normalized: dict[str, Any] = {"v": 1}
+    for key in ("usd_toman", "gold18k_toman"):
+        value = payload.get(key)
+        if isinstance(value, bool):
+            raise ValueError(f"invalid {key}")
+        try:
+            number = int(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"invalid {key}") from exc
+        if number <= 0 or number > 10**15:
+            raise ValueError(f"out-of-range {key}")
+        normalized[key] = number
+
+    updated_at = payload.get("updated_at")
+    if not isinstance(updated_at, str) or len(updated_at) < 10 or len(updated_at) > 32:
+        raise ValueError("invalid updated_at")
+    try:
+        dt.datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("invalid updated_at") from exc
+    normalized["updated_at"] = updated_at
+    normalized["usd_stale"] = bool(payload.get("usd_stale", True))
+    normalized["gold_stale"] = bool(payload.get("gold_stale", True))
+    return normalized
+
+
+def refresh_market_snapshot_once() -> bool:
+    """Fetch the tiny GitHub Action artifact; preserve last-good data on errors."""
+    global market_snapshot, market_snapshot_fetched_at, market_snapshot_error
+    try:
+        with requests.get(
+            MARKET_SOURCE_URL,
+            params={"v": int(time.time())},
+            headers={
+                "Accept": "application/json",
+                "Cache-Control": "no-cache",
+                "Accept-Encoding": "identity",
+                "User-Agent": "PySmartHome-PC/4.1 market-proxy",
+            },
+            timeout=(3, MARKET_HTTP_TIMEOUT),
+            stream=True,
+        ) as response:
+            response.raise_for_status()
+            content_length = response.headers.get("Content-Length")
+            if content_length and int(content_length) > 512:
+                raise ValueError("market snapshot exceeds 512 bytes")
+            raw = response.raw.read(513)
+            if len(raw) > 512:
+                raise ValueError("market snapshot exceeds 512 bytes")
+        payload = validate_market_snapshot(json.loads(raw.decode("utf-8")))
+        with market_lock:
+            market_snapshot = payload
+            market_snapshot_fetched_at = time.time()
+            market_snapshot_error = "OK"
+        logger.info(
+            "Market snapshot refreshed • USD=%s T • Gold18K=%s T",
+            payload["usd_toman"], payload["gold18k_toman"],
+            extra={"category": "MARKET"},
+        )
+        return True
+    except Exception as exc:
+        with market_lock:
+            market_snapshot_error = str(exc)[:180]
+        logger.warning("Market snapshot refresh failed • %s", exc, extra={"category": "MARKET"})
+        return False
+
+
+def market_worker_loop() -> None:
+    while True:
+        ok = refresh_market_snapshot_once()
+        # A short retry helps the service recover quickly after startup/network
+        # loss; normal refreshes remain aligned with the Action's 5-minute feed.
+        time.sleep(MARKET_REFRESH_SECONDS if ok else min(30, MARKET_REFRESH_SECONDS))
+
+
 # ---------------------------- background worker -----------------------------
 def worker_loop() -> None:
     next_publish = 0.0
@@ -592,12 +684,15 @@ def worker_loop() -> None:
 
 
 def start_worker() -> None:
-    global worker_started
-    if worker_started:
-        return
-    worker_started = True
-    threading.Thread(target=worker_loop, name="pysmarthome-worker", daemon=True).start()
-    logger.info("Background worker started • poll=%ss • publish=%ss", POLL_INTERVAL, PUBLISH_INTERVAL, extra={"category": "SYS"})
+    global worker_started, market_worker_started
+    if not worker_started:
+        worker_started = True
+        threading.Thread(target=worker_loop, name="pysmarthome-worker", daemon=True).start()
+        logger.info("Background worker started • poll=%ss • publish=%ss", POLL_INTERVAL, PUBLISH_INTERVAL, extra={"category": "SYS"})
+    if not market_worker_started:
+        market_worker_started = True
+        threading.Thread(target=market_worker_loop, name="pysmarthome-market", daemon=True).start()
+        logger.info("Market proxy worker started • refresh=%ss", MARKET_REFRESH_SECONDS, extra={"category": "MARKET"})
 
 # ------------------------------- flask --------------------------------------
 app = Flask(__name__)
@@ -695,17 +790,39 @@ def root():
     return response
 
 
+@app.get("/api/market")
+def api_market():
+    """Serve the tiny validated market file to ESP32 nodes over local HTTP."""
+    with market_lock:
+        snapshot = dict(market_snapshot) if market_snapshot is not None else None
+        fetched_at = market_snapshot_fetched_at
+        error = market_snapshot_error
+    if snapshot is None:
+        return jsonify({"ok": False, "error": "market_snapshot_not_ready", "detail": error}), 503
+    response = jsonify(snapshot)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["X-Market-Proxy-Age"] = str(max(0, int(time.time() - fetched_at)))
+    return response
+
+
 @app.get("/api/health")
 def api_health():
+    with market_lock:
+        market_ready = market_snapshot is not None
+        market_age = max(0, int(time.time() - market_snapshot_fetched_at)) if market_snapshot_fetched_at else None
+        market_error = market_snapshot_error
     return jsonify({
         "ok": True,
         "service": "PySmartHome-PC",
-        "version": "4.0.0",
+        "version": "4.1.0",
         "schema_version": 4,
         "time": iso_now(),
         "timezone": "Asia/Tehran",
         "github_sync_enabled": github_enabled(),
         "worker_started": worker_started,
+        "market_proxy_ready": market_ready,
+        "market_proxy_age_seconds": market_age,
+        "market_proxy_error": market_error,
         "mode": "frozen" if FROZEN else "python",
     })
 
@@ -718,8 +835,12 @@ def api_diagnostics():
     except OSError:
         disk_status = None
     with state_lock:
+        with market_lock:
+            market_ready = market_snapshot is not None
+            market_age = max(0, int(time.time() - market_snapshot_fetched_at)) if market_snapshot_fetched_at else None
+            market_error = market_snapshot_error
         return jsonify({
-            "version": "4.0.0",
+            "version": "4.1.0",
             "generated_at": iso_now(),
             "uptime_seconds": max(0, int(time.time() - runtime["started_at"])),
             "poll_cycles": runtime["poll_cycles"],
@@ -727,6 +848,9 @@ def api_diagnostics():
             "last_publish": runtime["last_publish"],
             "publish_ok": runtime["last_publish_ok"],
             "publish_error": runtime["publish_error"],
+            "market_proxy_ready": market_ready,
+            "market_proxy_age_seconds": market_age,
+            "market_proxy_error": market_error,
             "host": HOST,
             "port": PORT,
             "poll_interval_seconds": POLL_INTERVAL,
