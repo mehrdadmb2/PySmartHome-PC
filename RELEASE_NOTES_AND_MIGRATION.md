@@ -1,3 +1,9 @@
+## Version 4.1.1 reliability update
+
+- Arduino compile fix: `MarketState` now lives in `MarketState.h` beside each sketch.
+- Market proxy now restores a persistent last-good snapshot, supports a fallback origin, uses bounded retry/backoff, and marks old data stale.
+- GitHub Actions now runs in order: Python/frontend checks, firmware builds, then market refresh after successful CI; the five-minute market schedule remains independent.
+
 # PySmartHome-PC — Release and Migration Notes
 
 The latest prepared source bundle is **4.1.0**. The original 4.0.0 migration notes are retained below for historical upgrades.

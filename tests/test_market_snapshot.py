@@ -63,3 +63,39 @@ def test_rejects_missing_or_invalid_timestamp():
     payload = {"dollarPrice": 700_000_000, "gold18K": 120_000_000}
     with pytest.raises(ValueError, match="timestamp"):
         build_outputs(payload)
+
+
+def test_download_source_retries_then_uses_fallback(monkeypatch):
+    from io import BytesIO
+    from urllib.error import URLError
+    from scripts import update_market_snapshot as updater
+
+    payload = {
+        "dollarPrice": 700_000_000,
+        "gold18K": 120_000_000,
+        "timestamp": "2026-11-24T11:59:00Z",
+        "derivedStale": {"dollar": False, "gold18K": False},
+    }
+    calls = []
+
+    class FakeResponse(BytesIO):
+        status = 200
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            self.close()
+
+    def fake_urlopen(request, timeout):
+        calls.append(request.full_url)
+        if len(calls) <= 3:
+            raise URLError("temporary timeout")
+        return FakeResponse(json.dumps(payload).encode("utf-8"))
+
+    monkeypatch.setattr(updater, "SOURCE_URLS", ("https://primary.invalid/latest.json", "https://fallback.invalid/latest.json"))
+    monkeypatch.setattr(updater.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+
+    result = updater.download_source()
+    assert result["dollarPrice"] == 700_000_000
+    assert calls[:3] == ["https://primary.invalid/latest.json"] * 3
+    assert calls[3] == "https://fallback.invalid/latest.json"

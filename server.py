@@ -103,11 +103,22 @@ PUBLISH_INTERVAL = env_int("PYSMART_HOME_PUBLISH_SECONDS", 300, 30, 86400)
 NODE_TIMEOUT = env_int("PYSMART_HOME_NODE_TIMEOUT", 45, 20, 86400)
 HTTP_TIMEOUT = env_int("PYSMART_HOME_HTTP_TIMEOUT", 4, 1, 60)
 MARKET_REFRESH_SECONDS = env_int("PYSMART_MARKET_REFRESH_SECONDS", 60, 15, 3600)
-MARKET_HTTP_TIMEOUT = env_int("PYSMART_MARKET_HTTP_TIMEOUT", 5, 2, 30)
+MARKET_HTTP_TIMEOUT = env_int("PYSMART_MARKET_HTTP_TIMEOUT", 8, 5, 30)
+MARKET_CONNECT_TIMEOUT = env_int("PYSMART_MARKET_CONNECT_TIMEOUT", 4, 1, 15)
+MARKET_MAX_AGE_SECONDS = env_int("PYSMART_MARKET_MAX_AGE_SECONDS", 900, 60, 86400)
 MARKET_SOURCE_URL = os.getenv(
     "PYSMART_MARKET_SOURCE_URL",
     "https://raw.githubusercontent.com/mehrdadmb2/PySmartHome-PC/main/market/esp32.json",
 ).strip()
+MARKET_SOURCE_URLS = [MARKET_SOURCE_URL]
+for _url in os.getenv(
+    "PYSMART_MARKET_FALLBACK_URLS",
+    "https://mehrdadmb2.github.io/PySmartHome-PC/market/esp32.json",
+).split(","):
+    _url = _url.strip()
+    if _url and _url not in MARKET_SOURCE_URLS:
+        MARKET_SOURCE_URLS.append(_url)
+MARKET_CACHE_FILE = DATA_DIR / "market_snapshot_cache.json"
 TEMP_ALERT_THRESHOLD = env_float("PYSMART_TEMP_ALERT", 35.0, -40.0, 100.0)
 API_ADMIN_KEY = os.getenv("PYSMART_HOME_ADMIN_KEY", "").strip()
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
@@ -173,6 +184,8 @@ market_lock = threading.RLock()
 market_snapshot: dict[str, Any] | None = None
 market_snapshot_fetched_at = 0.0
 market_snapshot_error = "not fetched yet"
+market_last_attempt_at = 0.0
+market_consecutive_failures = 0
 
 sensors: dict[str, dict[str, Any]] = {
     key: {
@@ -618,53 +631,110 @@ def validate_market_snapshot(payload: Any) -> dict[str, Any]:
     return normalized
 
 
-def refresh_market_snapshot_once() -> bool:
-    """Fetch the tiny GitHub Action artifact; preserve last-good data on errors."""
+def _persist_market_cache(payload: dict[str, Any], fetched_at: float) -> None:
+    """Atomically persist the last valid snapshot for offline/restart recovery."""
+    wrapper = {"saved_at": fetched_at, "snapshot": payload}
+    temporary = MARKET_CACHE_FILE.with_suffix(".json.tmp")
+    try:
+        temporary.write_text(json.dumps(wrapper, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        os.replace(temporary, MARKET_CACHE_FILE)
+    except OSError as exc:
+        logger.warning("Could not persist market cache • %s", exc, extra={"category": "MARKET"})
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def load_market_cache() -> bool:
+    """Restore a previously validated snapshot before the network worker starts."""
     global market_snapshot, market_snapshot_fetched_at, market_snapshot_error
     try:
-        with requests.get(
-            MARKET_SOURCE_URL,
-            params={"v": int(time.time())},
-            headers={
-                "Accept": "application/json",
-                "Cache-Control": "no-cache",
-                "Accept-Encoding": "identity",
-                "User-Agent": "PySmartHome-PC/4.1 market-proxy",
-            },
-            timeout=(3, MARKET_HTTP_TIMEOUT),
-            stream=True,
-        ) as response:
-            response.raise_for_status()
-            content_length = response.headers.get("Content-Length")
-            if content_length and int(content_length) > 512:
-                raise ValueError("market snapshot exceeds 512 bytes")
-            raw = response.raw.read(513)
-            if len(raw) > 512:
-                raise ValueError("market snapshot exceeds 512 bytes")
-        payload = validate_market_snapshot(json.loads(raw.decode("utf-8")))
+        wrapper = json.loads(MARKET_CACHE_FILE.read_text(encoding="utf-8"))
+        payload = validate_market_snapshot(wrapper.get("snapshot"))
+        saved_at = float(wrapper.get("saved_at", 0))
+        if not math.isfinite(saved_at) or saved_at <= 0:
+            raise ValueError("invalid cache timestamp")
         with market_lock:
             market_snapshot = payload
-            market_snapshot_fetched_at = time.time()
-            market_snapshot_error = "OK"
-        logger.info(
-            "Market snapshot refreshed • USD=%s T • Gold18K=%s T",
-            payload["usd_toman"], payload["gold18k_toman"],
-            extra={"category": "MARKET"},
-        )
+            market_snapshot_fetched_at = saved_at
+            age = max(0, int(time.time() - saved_at))
+            market_snapshot_error = "Restored local cache" if age <= MARKET_MAX_AGE_SECONDS else "Restored stale local cache"
+        logger.info("Restored local market cache • age=%ss", age, extra={"category": "MARKET"})
         return True
-    except Exception as exc:
-        with market_lock:
-            market_snapshot_error = str(exc)[:180]
-        logger.warning("Market snapshot refresh failed • %s", exc, extra={"category": "MARKET"})
+    except FileNotFoundError:
         return False
+    except Exception as exc:
+        logger.warning("Ignoring invalid local market cache • %s", exc, extra={"category": "MARKET"})
+        return False
+
+
+def refresh_market_snapshot_once() -> bool:
+    """Fetch a tiny snapshot from primary/fallback origins; never discard last-good data."""
+    global market_snapshot, market_snapshot_fetched_at, market_snapshot_error
+    global market_last_attempt_at, market_consecutive_failures
+    market_last_attempt_at = time.time()
+    errors: list[str] = []
+    for source_url in MARKET_SOURCE_URLS:
+        try:
+            with requests.get(
+                source_url,
+                params={"v": int(time.time())},
+                headers={
+                    "Accept": "application/json",
+                    "Cache-Control": "no-cache",
+                    "Accept-Encoding": "identity",
+                    "User-Agent": "PySmartHome-PC/4.1.1 market-proxy",
+                    "Connection": "close",
+                },
+                timeout=(MARKET_CONNECT_TIMEOUT, MARKET_HTTP_TIMEOUT),
+                stream=True,
+            ) as response:
+                response.raise_for_status()
+                content_length = response.headers.get("Content-Length")
+                if content_length and int(content_length) > 512:
+                    raise ValueError("market snapshot exceeds 512 bytes")
+                raw = response.raw.read(513)
+                if len(raw) > 512:
+                    raise ValueError("market snapshot exceeds 512 bytes")
+            payload = validate_market_snapshot(json.loads(raw.decode("utf-8")))
+            fetched_at = time.time()
+            with market_lock:
+                market_snapshot = payload
+                market_snapshot_fetched_at = fetched_at
+                market_snapshot_error = "OK"
+                market_consecutive_failures = 0
+            _persist_market_cache(payload, fetched_at)
+            logger.info(
+                "Market snapshot refreshed • source=%s • USD=%s T • Gold18K=%s T",
+                source_url.split("/")[2], payload["usd_toman"], payload["gold18k_toman"],
+                extra={"category": "MARKET"},
+            )
+            return True
+        except Exception as exc:
+            errors.append(f"{source_url.split('/')[2]}: {str(exc)[:100]}")
+    detail = " | ".join(errors)[:350] or "no market source configured"
+    with market_lock:
+        market_snapshot_error = detail
+        market_consecutive_failures += 1
+        has_cache = market_snapshot is not None
+    logger.warning(
+        "All market sources failed • attempts=%s • cached=%s • %s",
+        len(MARKET_SOURCE_URLS), has_cache, detail, extra={"category": "MARKET"}
+    )
+    return False
 
 
 def market_worker_loop() -> None:
     while True:
         ok = refresh_market_snapshot_once()
-        # A short retry helps the service recover quickly after startup/network
-        # loss; normal refreshes remain aligned with the Action's 5-minute feed.
-        time.sleep(MARKET_REFRESH_SECONDS if ok else min(30, MARKET_REFRESH_SECONDS))
+        if ok:
+            delay = MARKET_REFRESH_SECONDS
+        else:
+            with market_lock:
+                failures = max(1, market_consecutive_failures)
+            delay = min(300, max(15, 15 * (2 ** min(failures - 1, 4))))
+        time.sleep(delay)
 
 
 # ---------------------------- background worker -----------------------------
@@ -690,6 +760,7 @@ def start_worker() -> None:
         threading.Thread(target=worker_loop, name="pysmarthome-worker", daemon=True).start()
         logger.info("Background worker started • poll=%ss • publish=%ss", POLL_INTERVAL, PUBLISH_INTERVAL, extra={"category": "SYS"})
     if not market_worker_started:
+        load_market_cache()
         market_worker_started = True
         threading.Thread(target=market_worker_loop, name="pysmarthome-market", daemon=True).start()
         logger.info("Market proxy worker started • refresh=%ss", MARKET_REFRESH_SECONDS, extra={"category": "MARKET"})
@@ -799,8 +870,18 @@ def api_market():
         error = market_snapshot_error
     if snapshot is None:
         return jsonify({"ok": False, "error": "market_snapshot_not_ready", "detail": error}), 503
+    snapshot_age = max(0, int(time.time() - fetched_at))
+    try:
+        generated_at = dt.datetime.fromisoformat(snapshot["updated_at"].replace("Z", "+00:00"))
+        source_age = max(0, int((dt.datetime.now(dt.timezone.utc) - generated_at.astimezone(dt.timezone.utc)).total_seconds()))
+    except (KeyError, TypeError, ValueError):
+        source_age = MARKET_MAX_AGE_SECONDS + 1
+    if source_age > MARKET_MAX_AGE_SECONDS:
+        snapshot["usd_stale"] = True
+        snapshot["gold_stale"] = True
     response = jsonify(snapshot)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["X-Market-Source-Age"] = str(source_age)
     response.headers["X-Market-Proxy-Age"] = str(max(0, int(time.time() - fetched_at)))
     return response
 
@@ -814,7 +895,7 @@ def api_health():
     return jsonify({
         "ok": True,
         "service": "PySmartHome-PC",
-        "version": "4.1.0",
+        "version": "4.1.1",
         "schema_version": 4,
         "time": iso_now(),
         "timezone": "Asia/Tehran",
@@ -823,6 +904,9 @@ def api_health():
         "market_proxy_ready": market_ready,
         "market_proxy_age_seconds": market_age,
         "market_proxy_error": market_error,
+        "market_source_count": len(MARKET_SOURCE_URLS),
+        "market_cache_persisted": MARKET_CACHE_FILE.is_file(),
+        "market_lan_access_enabled": HOST in {"0.0.0.0", "::"},
         "mode": "frozen" if FROZEN else "python",
     })
 
@@ -840,7 +924,7 @@ def api_diagnostics():
             market_age = max(0, int(time.time() - market_snapshot_fetched_at)) if market_snapshot_fetched_at else None
             market_error = market_snapshot_error
         return jsonify({
-            "version": "4.1.0",
+            "version": "4.1.1",
             "generated_at": iso_now(),
             "uptime_seconds": max(0, int(time.time() - runtime["started_at"])),
             "poll_cycles": runtime["poll_cycles"],
@@ -851,6 +935,10 @@ def api_diagnostics():
             "market_proxy_ready": market_ready,
             "market_proxy_age_seconds": market_age,
             "market_proxy_error": market_error,
+            "market_source_count": len(MARKET_SOURCE_URLS),
+            "market_cache_persisted": MARKET_CACHE_FILE.is_file(),
+            "market_max_age_seconds": MARKET_MAX_AGE_SECONDS,
+            "market_lan_access_enabled": HOST in {"0.0.0.0", "::"},
             "host": HOST,
             "port": PORT,
             "poll_interval_seconds": POLL_INTERVAL,
@@ -1078,6 +1166,8 @@ if __name__ == "__main__":
     logger.info("Iran time zone: Asia/Tehran (UTC+03:30)", extra={"category": "TIME"})
     logger.info("GitHub sync: %s", "enabled" if github_enabled() else "disabled", extra={"category": "SYNC"})
     logger.info("Network exposure: %s", "LAN-enabled; protect the PC firewall and set an admin key" if HOST in {"0.0.0.0", "::"} else "local-only", extra={"category": "SEC"})
+    if HOST not in {"0.0.0.0", "::"}:
+        logger.warning("Market LAN access is disabled • ESP32 nodes cannot reach this PC until PYSMART_HOME_HOST=0.0.0.0 is set in .env", extra={"category": "MARKET"})
     logger.info("Outage reference: today 13:00–15:00 • Friday skipped", extra={"category": "OUTAGE"})
     start_worker()
     app.run(host=HOST, port=PORT, debug=False, threaded=True)

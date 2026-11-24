@@ -74,7 +74,7 @@ The project intentionally separates sensor firmware from the dashboard and serve
 - Both OLEDs show live DHT22 temperature/humidity and the two ArzPulse market values: USD/USDT-derived dollar rate and one gram of 18-karat gold, displayed in Toman.
 - Reads only a tiny local HTTP endpoint from the PC (`/api/market`). The PC retrieves the precomputed GitHub snapshot; neither board performs TLS, downloads the full ArzPulse feed, nor converts currencies.
 - Uses a compact four-card layout on the 128×64 display; the 128×32 display scrolls a boxed market ticker so neither full price is permanently truncated.
-- Retains the last in-memory market snapshot during a temporary network failure and marks aged/source-stale values with a `~` indicator.
+- Retains the last validated market snapshot in memory and on disk across service restarts, uses primary/fallback GitHub origins with bounded retry backoff, and marks old/source-stale values with a `~` indicator.
 - Reads JSON from each node's `GET /api/status` endpoint.
 - Accepts the firmware's `temp` key and the clearer `temperature` alias, alongside `humidity`.
 - Records timestamped measurements to per-node, per-day CSV files.
@@ -186,7 +186,7 @@ The two sketches are adapted to their display dimensions:
 
 ### GitHub Actions market pipeline
 
-The workflow `.github/workflows/update-market-snapshot.yml` runs every five minutes and can also be started manually from **Actions → Update compact market snapshot → Run workflow**. It downloads the full source only on the GitHub-hosted runner, validates the source fields, converts IRR to Toman once, and writes these small outputs:
+The workflow `.github/workflows/update-market-snapshot.yml` runs every five minutes, can be started manually, and is also triggered after the ordered Project CI pipeline succeeds on `main`. Project CI runs Python/frontend checks first and compiles both ESP32 firmware targets second; only a successful CI completion triggers the post-change market refresh. It downloads the full source only on the GitHub-hosted runner, validates the source fields, converts IRR to Toman once, and writes these small outputs:
 
 | Repository path | Purpose |
 |---|---|
@@ -209,7 +209,7 @@ That file contains no charts, history, other coins, or calculation inputs. The A
 
 ### PC proxy and firmware network isolation
 
-The Python service fetches the compact snapshot from GitHub every 60 seconds by default. It validates the version, price values, timestamp, and 512-byte size limit before replacing the in-memory cache. A failed fetch preserves the last good snapshot. The local endpoint `/api/market` returns that cache; `/api/health` on the PC reports proxy readiness, cache age, and the last proxy error.
+The Python service fetches the compact snapshot from GitHub every 60 seconds by default. It validates the version, price values, timestamp, and 512-byte size limit before replacing the in-memory cache. A failed fetch preserves the last good snapshot both in memory and in `data/market_snapshot_cache.json`, so a PC restart does not immediately remove prices. The proxy tries a primary Raw GitHub URL and a GitHub Pages fallback, applies bounded timeouts and exponential backoff, and marks snapshots stale based on their generation time. The local endpoint `/api/market` returns the validated cache; `/api/health` reports proxy readiness, source count, cache age, and the last proxy error.
 
 The ESP32 makes a plain HTTP request to the PC over the trusted home LAN. That request runs in a low-priority FreeRTOS task pinned to the network core—not inside `loop()`. The task uses a fixed 384-byte ArduinoJson document, rejects unexpectedly large responses, applies short connection/read timeouts, and retries with backoff (30 seconds up to five minutes). It does not establish TLS, perform currency conversion, or parse the full ArzPulse JSON. The last good values remain in memory during temporary failures. The board compares the snapshot's `updated_at` marker before refreshing its freshness timer, so repeatedly receiving an unchanged old cache does not make stale prices look fresh.
 

@@ -10,6 +10,7 @@ import json
 import math
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -18,7 +19,10 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_URL = "https://raw.githubusercontent.com/mehrdadmb2/ArzPulse/main/docs/data/latest.json"
+SOURCE_URLS = (
+    "https://raw.githubusercontent.com/mehrdadmb2/ArzPulse/main/docs/data/latest.json",
+    "https://mehrdadmb2.github.io/ArzPulse/data/latest.json",
+)
 MAX_SOURCE_AGE = timedelta(minutes=20)
 USER_AGENT = "PySmartHome-PC-MarketSnapshot/1.0 (+https://github.com/mehrdadmb2/PySmartHome-PC)"
 
@@ -147,28 +151,44 @@ def build_outputs(payload: dict[str, Any], now: datetime | None = None) -> dict[
 
 
 def download_source() -> dict[str, Any]:
-    request = urllib.request.Request(
-        SOURCE_URL,
-        headers={
-            "User-Agent": USER_AGENT,
-            "Accept": "application/json",
-            "Cache-Control": "no-cache",
-        },
-        method="GET",
-    )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        if response.status != 200:
-            raise RuntimeError(f"ArzPulse returned HTTP {response.status}")
-        raw = response.read(2 * 1024 * 1024 + 1)
-    if len(raw) > 2 * 1024 * 1024:
-        raise RuntimeError("ArzPulse response exceeded the 2 MiB safety limit")
-    try:
-        value = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"ArzPulse JSON is invalid: {exc}") from exc
-    if not isinstance(value, dict):
-        raise RuntimeError("ArzPulse JSON root is not an object")
-    return value
+    """Fetch ArzPulse from redundant origins with bounded retries per origin."""
+    failures: list[str] = []
+    for source_url in SOURCE_URLS:
+        for attempt in range(1, 4):
+            request = urllib.request.Request(
+                source_url,
+                headers={
+                    "User-Agent": USER_AGENT,
+                    "Accept": "application/json",
+                    "Cache-Control": "no-cache",
+                    "Accept-Encoding": "identity",
+                    "Connection": "close",
+                },
+                method="GET",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=12) as response:
+                    if response.status != 200:
+                        raise RuntimeError(f"HTTP {response.status}")
+                    raw = response.read(2 * 1024 * 1024 + 1)
+                if len(raw) > 2 * 1024 * 1024:
+                    raise RuntimeError("response exceeded the 2 MiB safety limit")
+                value = json.loads(raw.decode("utf-8"))
+                if not isinstance(value, dict):
+                    raise RuntimeError("JSON root is not an object")
+                # Validate required fields before accepting this origin.
+                positive_decimal(value.get("dollarPrice"), "dollarPrice")
+                positive_decimal(value.get("gold18K"), "gold18K")
+                if parse_timestamp(value.get("timestamp")) is None:
+                    raise RuntimeError("missing/invalid source timestamp")
+                print(f"Source OK: {source_url} (attempt {attempt}/3)")
+                return value
+            except Exception as exc:
+                failures.append(f"{source_url} attempt {attempt}/3: {type(exc).__name__}: {exc}")
+                if attempt < 3:
+                    time.sleep(attempt * 2)
+    details = " | ".join(failures[-6:])
+    raise RuntimeError(f"All ArzPulse origins failed: {details}")
 
 
 def write_outputs(outputs: dict[str, bytes]) -> None:

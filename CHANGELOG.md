@@ -1,3 +1,11 @@
+## 4.1.1 - 2026-11-24
+
+- Fixed Arduino sketch prototype-order compilation by moving `MarketState` into per-board headers.
+- Added persistent last-known-good market cache and automatic restoration after PC service restart.
+- Added primary/fallback market snapshot origins, bounded timeouts, exponential retry backoff, and source-age stale flags.
+- Reworked GitHub Actions into an ordered pipeline: Python quality checks → both firmware builds → market refresh after successful CI; scheduled market refresh remains every five minutes.
+- Added workflow concurrency controls and compact payload validation before publishing.
+
 # Changelog
 
 ## 4.1.0 — 2026-11-24

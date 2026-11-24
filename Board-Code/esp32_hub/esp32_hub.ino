@@ -22,6 +22,7 @@
 #include <math.h>
 #include <string.h>
 #include <esp_system.h>
+#include "MarketState.h"
 
 // ----------------------- User network settings -----------------------
 
@@ -222,18 +223,6 @@ void readSensorIfDue(uint32_t now) {
 
 // ---------------------- Compact market snapshot -----------------------
 
-struct MarketState {
-  uint64_t dollarToman;
-  uint64_t gold18KToman;
-  bool dollarValid;
-  bool goldValid;
-  bool dollarSourceStale;
-  bool goldSourceStale;
-  uint32_t lastSuccessAt;
-  int lastHttpCode;
-  char lastError[48];
-  char updatedAt[28];
-};
 
 static MarketState marketState = {
   0, 0, false, false, true, true, 0, 0, "Not fetched yet", ""
@@ -288,7 +277,7 @@ bool fetchCompactMarketSnapshot() {
   http.setConnectTimeout(1200);
   http.setTimeout(1500);
   http.setReuse(false);
-  http.setUserAgent("PySmartHome-PC/4.1 ESP32-market-client");
+  http.setUserAgent("PySmartHome-PC/4.1.1 ESP32-market-client");
 
   // The local Flask endpoint explicitly sends Cache-Control: no-store.
   // Avoid dynamic URL construction so the repeated fetch does not fragment heap.
