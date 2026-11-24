@@ -1,21 +1,28 @@
 # 🏠 PySmartHome-PC
 
 <p align="center">
-  <strong>A local-first, resilient smart-home telemetry platform for ESP32 sensor nodes</strong><br>
-  <sub>ESP32 → Python service → local dashboard / optional GitHub sync → GitHub Pages</sub>
+  <strong>Local-first ESP32 telemetry · resilient OLED firmware · live Iran-market prices</strong><br>
+  <sub>ESP32 / ESP32-S3 → Python collector → local dashboard → optional GitHub Pages sync</sub>
 </p>
 
 <p align="center">
   <a href="https://github.com/mehrdadmb2/PySmartHome-PC/actions/workflows/ci.yml"><img src="https://github.com/mehrdadmb2/PySmartHome-PC/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
-  <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/ESP32-ESP32%20%2B%20ESP32--S3-E7352C?logo=espressif&logoColor=white" alt="ESP32 and ESP32-S3">
-  <img src="https://img.shields.io/badge/Interface-Responsive%20Web-0EA5E9" alt="Responsive web dashboard">
-  <img src="https://img.shields.io/badge/Deployment-Local%20%7C%20Pages%20%7C%20Desktop-7C3AED" alt="Deployment targets">
-  <a href="https://mehrdadmb2.github.io/PySmartHome-PC/"><img src="https://img.shields.io/badge/GitHub%20Pages-Live-2EA44F?logo=github" alt="GitHub Pages"></a>
-  <a href="https://mehrdadmb2.github.io/github-page-insights/"><img src="https://img.shields.io/badge/Traffic-GitHub%20Page%20Insights-8B5CF6" alt="Traffic analytics"></a>
-  <a href="https://github.com/mehrdadmb2/PySmartHome-PC/stargazers"><img src="https://img.shields.io/github/stars/mehrdadmb2/PySmartHome-PC?style=social" alt="GitHub stars"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-2563EB?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/Arduino-ESP32%20Core-E7352C?style=for-the-badge&logo=arduino&logoColor=white" alt="Arduino ESP32">
+  <img src="https://img.shields.io/badge/Boards-ESP32%20%7C%20ESP32--S3-0F766E?style=for-the-badge&logo=espressif&logoColor=white" alt="ESP32 boards">
+  <img src="https://img.shields.io/badge/Display-SSD1306%20OLED-334155?style=for-the-badge" alt="SSD1306 OLED">
+  <img src="https://img.shields.io/badge/Sensor-DHT22-0D9488?style=for-the-badge" alt="DHT22 sensor">
+  <img src="https://img.shields.io/badge/Market%20feed-ArzPulse-F59E0B?style=for-the-badge" alt="ArzPulse market feed">
+  <img src="https://img.shields.io/badge/Market%20refresh-5%20minutes-16A34A?style=for-the-badge" alt="Five minute market refresh">
+  <img src="https://img.shields.io/badge/Currency-IRR%20%E2%86%92%20Toman-0891B2?style=for-the-badge" alt="Rial to Toman conversion">
+  <img src="https://img.shields.io/badge/Interface-Responsive%20Dashboard-0EA5E9?style=for-the-badge" alt="Responsive dashboard">
+  <img src="https://img.shields.io/badge/Deployment-Local%20%7C%20Pages%20%7C%20Desktop-7C3AED?style=for-the-badge" alt="Deployment targets">
+  <a href="https://mehrdadmb2.github.io/PySmartHome-PC/"><img src="https://img.shields.io/badge/GitHub%20Pages-Live-2EA44F?style=for-the-badge&logo=github" alt="GitHub Pages"></a>
+  <a href="https://github.com/mehrdadmb2/PySmartHome-PC/stargazers"><img src="https://img.shields.io/github/stars/mehrdadmb2/PySmartHome-PC?style=for-the-badge&logo=github" alt="GitHub stars"></a>
 </p>
+
+
 
 > **Project summary (فارسی):** سامانه‌ای برای خواندن دما و رطوبت از بردهای ESP32، ذخیره‌سازی محلی CSV، نمایش زنده و تاریخچه در داشبورد، برنامه‌ریزی خاموشی برق، همگام‌سازی انتخابی با GitHub و انتشار یک داشبورد عمومی روی GitHub Pages. اجرای محلی بدون GitHub هم کار می‌کند.
 
@@ -27,6 +34,7 @@
 - [Capabilities](#capabilities)
 - [Architecture and data flow](#architecture-and-data-flow)
 - [Hardware and wiring](#hardware-and-wiring)
+- [OLED monitors and ArzPulse market prices](#oled-monitors-and-arzpulse-market-prices)
 - [Software requirements](#software-requirements)
 - [Quick start on Windows](#quick-start-on-windows)
 - [Firmware setup](#firmware-setup)
@@ -61,7 +69,11 @@ The project intentionally separates sensor firmware from the dashboard and serve
 
 ### Sensor telemetry
 
-- Supports an ESP32 hub and an ESP32-S3 node out of the box.
+- Supports an ESP32 hub (128×64 SSD1306) and an ESP32-S3 node (128×32 SSD1306) out of the box.
+- Both OLEDs show live DHT22 temperature/humidity and the two ArzPulse market values: USD/USDT-derived dollar rate and one gram of 18-karat gold, displayed in Toman.
+- Reads ArzPulse `docs/data/latest.json` over HTTPS and refreshes successful price snapshots every five minutes; temporary provider/network failures trigger a one-minute retry without rebooting the board.
+- Uses a compact four-card layout on the 128×64 display; the 128×32 display scrolls a boxed market ticker so neither full price is permanently truncated.
+- Retains the last in-memory market snapshot during a temporary network failure and marks aged/source-stale values with a `~` indicator.
 - Reads JSON from each node's `GET /api/status` endpoint.
 - Accepts the firmware's `temp` key and the clearer `temperature` alias, alongside `humidity`.
 - Records timestamped measurements to per-node, per-day CSV files.
@@ -114,8 +126,10 @@ The project intentionally separates sensor firmware from the dashboard and serve
 
 ```mermaid
 flowchart TD
-    A[ESP32 Hub + DHT22] -->|HTTP JSON /api/status| P[Python service on PC]
-    B[ESP32-S3 + DHT22] -->|HTTP JSON /api/status| P
+    A[ESP32 Hub + DHT22 + OLED] -->|HTTP JSON /api/status| P[Python service on PC]
+    B[ESP32-S3 + DHT22 + OLED] -->|HTTP JSON /api/status| P
+    M[ArzPulse public latest.json] -->|HTTPS GET every 5 minutes| A
+    M -->|HTTPS GET every 5 minutes| B
     P --> C[CSV history + status.json + outage_schedule.json]
     P --> D[Local dashboard / localhost]
     C --> E{Optional GitHub Contents API sync}
@@ -126,7 +140,7 @@ flowchart TD
     I --> J[GitHub Page Insights dashboard]
 ```
 
-The PC is the control and persistence point. ESP32 nodes do not upload directly to GitHub. If GitHub publishing is disabled or temporarily unavailable, local sensor collection continues.
+The PC is the control and persistence point. ESP32 nodes do not upload sensor history directly to GitHub. If GitHub publishing is disabled or temporarily unavailable, local sensor collection continues. The boards independently read the public ArzPulse JSON snapshot only for their OLED market-price display; these values are not added to the PySmartHome-PC sensor CSV files.
 
 ## Hardware and wiring
 
@@ -157,6 +171,40 @@ The PC is the control and persistence point. ESP32 nodes do not upload directly 
 
 **Electrical note:** ESP32 GPIOs are 3.3 V logic. Check your exact board and sensor module wiring before powering it. Do not feed 5 V signals into an ESP32 GPIO. If your router uses a different subnet, change both firmware IP settings and the PC service URLs together, or change the firmware to DHCP and reserve addresses in the router.
 
+## OLED monitors and ArzPulse market prices
+
+The two sketches are deliberately adapted to their display dimensions:
+
+| Board | OLED | Layout |
+|---|---:|---|
+| ESP32 Hub (`esp32_hub.ino`) | 128×64 | Temperature and humidity cards, plus full dollar and one-gram 18K gold prices at the same time |
+| ESP32-S3 (`esp32_s3.ino`) | 128×32 | Temperature and humidity cards, plus a scrolling, bordered ticker containing both complete prices (dollar and 1g 18K gold) |
+
+### Price source and units
+
+Both boards read the same public snapshot from:
+
+`https://raw.githubusercontent.com/mehrdadmb2/ArzPulse/main/docs/data/latest.json`
+
+The firmware uses the top-level `dollarPrice` and `gold18K` fields. ArzPulse stores these values in **Iranian rials (IRR)**, so each is divided by 10 before it is displayed as **Toman**:
+
+- **Dollar:** `dollarPrice / 10` — ArzPulse's USDT/IRR market rate, used as the dollar-rate proxy.
+- **18K gold (1 gram):** `gold18K / 10` — ArzPulse's derived price for one gram of 18-karat gold.
+
+This is a display integration, not a separate price calculation or an independent quote provider. If ArzPulse marks a derived value as stale, or the board has not received a successful snapshot for ten minutes, the value is prefixed with `~`. A temporary fetch failure does not erase the last successful values. The next retry is scheduled after one minute; after a successful fetch, the normal refresh interval is five minutes.
+
+The ESP32-S3 has limited vertical space, so its lower ticker scrolls horizontally. The 128×64 hub shows both prices simultaneously. Price requests use bounded connection/read timeouts and a cache-busting query parameter; a slow/unavailable endpoint is retried instead of blocking the board indefinitely.
+
+### OLED and board recovery behaviour
+
+- A failed OLED initialization no longer traps the firmware in an infinite loop. I²C addresses `0x3C` and `0x3D` are tried, the bus is scanned in Serial Monitor, and OLED initialization is retried periodically.
+- A failed Wi-Fi connection no longer forces repeated ESP32 reboots. The board keeps sampling the sensor and retries the network connection.
+- DHT22 readings are sampled every 2.5 seconds. Invalid readings do not overwrite the last valid sample.
+- `/api/status` returns HTTP 503 until a valid sensor sample exists or when that sample becomes older than 20 seconds. The Python collector can therefore distinguish a real reading from a missing/stale sensor.
+- `/api/health` reports Wi-Fi, sensor, OLED and market-feed readiness for direct diagnostics.
+
+**Important:** the firmware placeholders `YOUR_WIFI_SSID` and `YOUR_WIFI_PASSWORD` must be replaced before uploading. The default static IP addresses remain `192.168.1.119` (hub) and `192.168.1.115` (S3), matching the Python service defaults shown below.
+
 ## Software requirements
 
 ### Required for the Python/local dashboard
@@ -177,9 +225,10 @@ Python dependencies are listed in `requirements.txt`:
 - DHT sensor library (Adafruit).
 - Adafruit SSD1306.
 - Adafruit GFX Library (dependency of SSD1306).
-- NTPClient and WiFiUdp for the hub sketch.
+- ArduinoJson 6.21.x (used with a deserialization filter so the large ArzPulse document does not need to be loaded into RAM in full).
+- ESP32 core libraries: `WiFi`, `WebServer`, `HTTPClient`, and `WiFiClientSecure` (included with the Espressif Arduino core).
 
-The ESP32-S3 sketch does not need NTPClient. Library names can vary slightly in the Arduino Library Manager; install the maintained Adafruit and Fabrice Weinberg/NTPClient packages as applicable.
+The current firmware does not require NTPClient. Install the Adafruit and ArduinoJson packages through Arduino IDE → Library Manager, and install the ESP32 platform through Boards Manager.
 
 ### Optional for the desktop executable
 
@@ -222,27 +271,101 @@ If other LAN devices need to edit the outage schedule, upload/delete CSVs, confi
 
 ## Firmware setup
 
-1. Open `Board-Code/esp32_hub.ino` in Arduino IDE and select an ESP32 board compatible with your module.
-2. Open `Board-Code/esp32_s3.ino` and select the appropriate ESP32-S3 board.
-3. Replace `YOUR_WIFI_SSID` and `YOUR_WIFI_PASSWORD` with your own network settings in both files. Do not push real credentials to a public repository.
-4. Update each `localIP`, `gateway`, and `subnet` block to match your network. The default IPs must be unique and outside the router's dynamic DHCP range, or be reserved in the router.
-5. Confirm the DHT22 data pin, OLED SDA/SCL pins, display dimensions, and `0x3C` address match the physical wiring.
-6. Install the libraries listed under [Software requirements](#software-requirements), compile, and flash each board.
-7. Open Serial Monitor at 115200 baud. The sketch prints connection/read failures and restarts if it cannot initially connect to Wi-Fi. If a sensor read is not ready, `/api/status` returns HTTP 503 rather than reporting a false 0 °C / 0% sample.
-8. Confirm both node endpoints return JSON after the first successful sensor read.
+### 1. Configure Wi-Fi and network addresses
 
-### Node response
+Open the required sketch in Arduino IDE:
 
-Successful `GET /api/status` response:
+- `Board-Code/esp32_hub.ino` for the ESP32 hub.
+- `Board-Code/esp32_s3.ino` for the ESP32-S3 node.
+
+In each sketch, replace:
+
+```cpp
+const char* WIFI_SSID = "YOUR_WIFI_SSID";
+const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+```
+
+Use the same 2.4 GHz Wi-Fi network that the PC can reach. Do not commit your real credentials to a public repository.
+
+The default network addresses are intentionally aligned with the Python service:
+
+| Node | Firmware IP | PC configuration variable |
+|---|---|---|
+| ESP32 Hub | `192.168.1.119` | `PYSMART_ESP32_1_URL` |
+| ESP32-S3 | `192.168.1.115` | `PYSMART_ESP32_S3_URL` |
+
+The default gateway/DNS is `192.168.1.1` and the subnet mask is `255.255.255.0`. If the router uses another subnet, update the firmware IP/gateway/subnet **and** the corresponding PC sensor URLs. Reserve the two static addresses in the router or make sure they are outside its DHCP pool. The two boards must never share an IP address.
+
+`USE_STATIC_IP` is enabled by default to preserve compatibility with the Python service. Do not switch it to DHCP unless you also reserve the resulting IP in the router and update the PC URL.
+
+### 2. Install the Arduino libraries
+
+In Arduino IDE → Library Manager, install:
+
+1. **DHT sensor library** by Adafruit.
+2. **Adafruit SSD1306**.
+3. **Adafruit GFX Library**.
+4. **ArduinoJson 6.21.x**.
+
+Install the Espressif **esp32** platform through Boards Manager. `WiFi`, `WebServer`, `HTTPClient`, `WiFiClientSecure` and `Wire` are supplied by that platform.
+
+### 3. Check pins and upload
+
+| Setting | ESP32 Hub | ESP32-S3 |
+|---|---:|---:|
+| DHT22 data | GPIO 13 | GPIO 6 |
+| OLED SDA | GPIO 5 | GPIO 5 |
+| OLED SCL | GPIO 4 | GPIO 4 |
+| OLED address | `0x3C` (fallback `0x3D`) | `0x3C` (fallback `0x3D`) |
+| OLED size | 128×64 | 128×32 |
+| HTTP endpoint | `http://192.168.1.119/api/status` | `http://192.168.1.115/api/status` |
+
+Select the correct ESP32 board and COM port, compile, and upload. Open Serial Monitor at **115200 baud**. The boot log reports I²C devices, OLED readiness, Wi-Fi connection attempts, DHT22 samples, and ArzPulse fetch results.
+
+### 4. Verify the nodes from the PC
+
+After the boards connect and the first valid DHT22 reading is taken, open these URLs from a device on the same LAN:
+
+- Hub: `http://192.168.1.119/api/status`
+- ESP32-S3: `http://192.168.1.115/api/status`
+- Health diagnostics: append `/api/health` to either address.
+
+A successful `/api/status` response includes the fields expected by the Python collector:
 
 ```json
 {
+  "node": "esp32_hub",
   "temp": 26.4,
-  "humidity": 42.0
+  "temperature": 26.4,
+  "humidity": 42.0,
+  "wifi": true,
+  "ip": "192.168.1.119",
+  "prices": {
+    "dollar_toman": 288998,
+    "gold18k_toman": 24958134,
+    "dollar_stale": false,
+    "gold_stale": false
+  }
 }
 ```
 
-The Python service also accepts `{"temperature": 26.4, "humidity": 42.0}` for compatibility with other firmware. The endpoint should stay on a trusted private network; the current firmware is intentionally lightweight and is not an internet-facing authenticated API.
+The values above are illustrative only. Actual values come from the latest ArzPulse snapshot. `/api/status` returns HTTP 503 while the DHT22 has not produced a valid sample or when its last valid sample is more than 20 seconds old. The Python service reads `temp` (or the compatible `temperature` alias) and `humidity`; the extra diagnostics and market fields do not change the CSV schema.
+
+### Firmware resilience and diagnostics
+
+- The firmware does not restart merely because Wi-Fi, the DHT22, the OLED, or ArzPulse is unavailable.
+- Wi-Fi reconnection is attempted periodically. Sensor sampling and the local HTTP service continue while network recovery is in progress.
+- Failed OLED initialization is retried, and Serial Monitor reports the discovered I²C addresses.
+- ArzPulse is fetched every five minutes after a successful response. A failed request/parse is retried after one minute; the most recent successful prices remain in RAM and are marked stale when appropriate.
+- The public ArzPulse feed is read-only and requires no API token. The firmware currently uses `WiFiClientSecure::setInsecure()` for this public endpoint to avoid certificate-expiry/root-CA maintenance on the microcontroller. No secret is sent, but HTTPS server certificates are not validated by the board. Keep the device on a trusted network and use a pinned/root CA approach if cryptographic source authentication is required.
+
+### Important hardware note
+
+If the OLED remains physically blank even during boot, the screen itself cannot display firmware diagnostics. Check common GND, 3.3 V/VCC compatibility, SDA/SCL orientation, the GPIO mapping, the OLED address, and the display module. Serial Monitor is the source of truth for the I²C scan and OLED initialization result. A wrong DHT22 wire does not normally prevent the OLED from showing its status.
+
+### Node response
+
+The Python collector accepts the firmware's `temp` key and the clearer `temperature` alias, alongside `humidity`. The endpoint is designed for a trusted private LAN; it is not an internet-facing authenticated API.
 
 ## Configuration reference
 
@@ -444,6 +567,11 @@ For hardware/network debugging:
 
 | Symptom | Likely cause | What to check |
 |---|---|---|
+| OLED is completely blank | OLED power, common GND, SDA/SCL wiring, wrong GPIOs/address, or failed display module | Open Serial Monitor at 115200; inspect the I²C scan and `[OLED]` initialization lines. The firmware tries `0x3C` and `0x3D` and retries initialization. |
+| OLED shows Wi-Fi retry/offline | Placeholder/incorrect SSID or password, 5 GHz-only network, wrong static subnet/gateway, or weak signal | Set the real 2.4 GHz Wi-Fi credentials; check `NODE_IP`, gateway and subnet in the sketch. The firmware retries without rebooting. |
+| Board is connected but appears offline in PySmartHome-PC | The board IP does not match the PC URL, PC firewall/network isolation, or DHT22 has not produced a fresh reading | Open the exact `/api/status` URL from the PC. Match `192.168.1.119` / `192.168.1.115` to the two `PYSMART_ESP32_*_URL` settings. |
+| ArzPulse price shows `--` | No Internet access, raw GitHub unavailable, invalid JSON, or no first successful price snapshot since boot | Check Serial Monitor for `[ArzPulse]` messages. The board retries after one minute; local sensor readings continue. |
+| ArzPulse price shows `~` | ArzPulse marks the derived quote stale, or the node has not refreshed its snapshot for more than ten minutes | Check the `derivedStale` flags and `timestamp` in ArzPulse `docs/data/latest.json`; the marker is intentional and does not mean the numeric value is zero. |
 | Both nodes appear offline | Wrong IP/subnet, Wi-Fi credentials, disconnected node, or PC firewall | Open each node `/api/status` from the PC and inspect Serial Monitor |
 | Node endpoint responds with 503 | DHT22 has not produced a valid reading yet | Wiring, power, pull-up, GPIO, and sensor readiness |
 | The dashboard cannot use live data | Server is not running, wrong port, or opened as `file://` | Start the server and use `http://127.0.0.1:5000` |
@@ -463,8 +591,8 @@ For hardware/network debugging:
 PySmartHome-PC/
 ├── .github/workflows/ci.yml       # GitHub Actions validation workflow
 ├── Board-Code/
-│   ├── esp32_hub.ino              # ESP32 Hub firmware
-│   └── esp32_s3.ino               # ESP32-S3 firmware
+│   ├── esp32_hub.ino              # ESP32 Hub: 128x64 OLED + DHT22 + ArzPulse prices
+│   └── esp32_s3.ino               # ESP32-S3: 128x32 OLED + DHT22 + scrolling prices
 ├── data/                          # CSV history + status/schedule JSON
 ├── tests/test_server.py           # Automated tests (no hardware required)
 ├── app.js                         # Dashboard behavior, charts, uploads, and themes
