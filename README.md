@@ -71,7 +71,7 @@ The project intentionally separates sensor firmware from the dashboard and serve
 
 - Supports an ESP32 hub (128×64 SSD1306) and an ESP32-S3 node (128×32 SSD1306) out of the box.
 - Both OLEDs show live DHT22 temperature/humidity and the two ArzPulse market values: USD/USDT-derived dollar rate and one gram of 18-karat gold, displayed in Toman.
-- Reads ArzPulse `docs/data/latest.json` over HTTPS and refreshes successful price snapshots every five minutes; temporary provider/network failures trigger a one-minute retry without rebooting the board.
+- Reads ArzPulse `docs/data/latest.json` over HTTPS and refreshes successful price snapshots every five minutes; temporary provider/network failures trigger bounded exponential retries (30 seconds up to five minutes) without intentionally rebooting the board.
 - Uses a compact four-card layout on the 128×64 display; the 128×32 display scrolls a boxed market ticker so neither full price is permanently truncated.
 - Retains the last in-memory market snapshot during a temporary network failure and marks aged/source-stale values with a `~` indicator.
 - Reads JSON from each node's `GET /api/status` endpoint.
@@ -191,9 +191,9 @@ The firmware uses the top-level `dollarPrice` and `gold18K` fields. ArzPulse sto
 - **Dollar:** `dollarPrice / 10` — ArzPulse's USDT/IRR market rate, used as the dollar-rate proxy.
 - **18K gold (1 gram):** `gold18K / 10` — ArzPulse's derived price for one gram of 18-karat gold.
 
-This is a display integration, not a separate price calculation or an independent quote provider. If ArzPulse marks a derived value as stale, or the board has not received a successful snapshot for ten minutes, the value is prefixed with `~`. A temporary fetch failure does not erase the last successful values. The next retry is scheduled after one minute; after a successful fetch, the normal refresh interval is five minutes.
+This is a display integration, not a separate price calculation or an independent quote provider. If ArzPulse marks a derived value as stale, or the board has not received a successful snapshot for ten minutes, the value is prefixed with `~`. A temporary fetch failure does not erase the last successful values. Failed fetches alternate between the GitHub Raw endpoint and the GitHub Pages mirror, with bounded exponential retries (30 seconds, 60 seconds, 120 seconds, then up to five minutes). After a successful fetch, the normal refresh interval is five minutes.
 
-The ESP32-S3 has limited vertical space, so its lower ticker scrolls horizontally. The 128×64 hub shows both prices simultaneously. Price requests use bounded connection/read timeouts and a cache-busting query parameter; a slow/unavailable endpoint is retried instead of blocking the board indefinitely.
+The ESP32-S3 has limited vertical space, so its lower ticker scrolls horizontally. The 128×64 hub shows both prices simultaneously. Price requests use bounded connection/read timeouts, explicit JSON/identity-encoding headers, a cache-busting query parameter, and a filtered ArduinoJson document with a larger memory budget. The firmware alternates between the Raw and Pages endpoints on successive failed attempts instead of running two TLS handshakes in one loop pass. This limits blocking time and helps avoid task-watchdog starvation on unstable networks.
 
 ### OLED and board recovery behaviour
 
@@ -201,7 +201,7 @@ The ESP32-S3 has limited vertical space, so its lower ticker scrolls horizontall
 - A failed Wi-Fi connection no longer forces repeated ESP32 reboots. The board keeps sampling the sensor and retries the network connection.
 - DHT22 readings are sampled every 2.5 seconds. Invalid readings do not overwrite the last valid sample.
 - `/api/status` returns HTTP 503 until a valid sensor sample exists or when that sample becomes older than 20 seconds. The Python collector can therefore distinguish a real reading from a missing/stale sensor.
-- `/api/health` reports Wi-Fi, sensor, OLED and market-feed readiness for direct diagnostics.
+- `/api/health` reports Wi-Fi, sensor, OLED and market-feed readiness, the last HTTP status/error, and the age of the last successful price snapshot for direct diagnostics.
 
 **Important:** the firmware placeholders `YOUR_WIFI_SSID` and `YOUR_WIFI_PASSWORD` must be replaced before uploading. The default static IP addresses remain `192.168.1.119` (hub) and `192.168.1.115` (S3), matching the Python service defaults shown below.
 
@@ -320,7 +320,7 @@ Install the Espressif **esp32** platform through Boards Manager. `WiFi`, `WebSer
 | OLED size | 128×64 | 128×32 |
 | HTTP endpoint | `http://192.168.1.119/api/status` | `http://192.168.1.115/api/status` |
 
-Select the correct ESP32 board and COM port, compile, and upload. Open Serial Monitor at **115200 baud**. The boot log reports I²C devices, OLED readiness, Wi-Fi connection attempts, DHT22 samples, and ArzPulse fetch results.
+Select the correct ESP32 board and COM port, compile, and upload. Open Serial Monitor at **115200 baud**. The boot log reports the ESP32 reset reason and free heap, I²C devices, OLED readiness, Wi-Fi connection attempts, DHT22 samples, ArzPulse endpoint selection, HTTP status, JSON parsing outcome, and the last successful prices.
 
 ### 4. Verify the nodes from the PC
 
@@ -353,10 +353,10 @@ The values above are illustrative only. Actual values come from the latest ArzPu
 
 ### Firmware resilience and diagnostics
 
-- The firmware does not restart merely because Wi-Fi, the DHT22, the OLED, or ArzPulse is unavailable.
+- The firmware does not intentionally restart merely because Wi-Fi, the DHT22, the OLED, or ArzPulse is unavailable. The boot log prints `esp_reset_reason()` so a power/brownout reset or watchdog reset can be distinguished from an ordinary startup.
 - Wi-Fi reconnection is attempted periodically. Sensor sampling and the local HTTP service continue while network recovery is in progress.
 - Failed OLED initialization is retried, and Serial Monitor reports the discovered I²C addresses.
-- ArzPulse is fetched every five minutes after a successful response. A failed request/parse is retried after one minute; the most recent successful prices remain in RAM and are marked stale when appropriate.
+- ArzPulse is fetched every five minutes after a successful response. A failed request/parse alternates the Raw and Pages endpoints and uses bounded exponential backoff from 30 seconds up to five minutes; the most recent successful prices remain in RAM and are marked stale when appropriate.
 - The public ArzPulse feed is read-only and requires no API token. The firmware currently uses `WiFiClientSecure::setInsecure()` for this public endpoint to avoid certificate-expiry/root-CA maintenance on the microcontroller. No secret is sent, but HTTPS server certificates are not validated by the board. Keep the device on a trusted network and use a pinned/root CA approach if cryptographic source authentication is required.
 
 ### Important hardware note
@@ -563,6 +563,16 @@ For hardware/network debugging:
 5. If GitHub sync fails, verify token permissions, repository owner/name/branch, internet connectivity, and rate-limit/error details in the log.
 6. If the public dashboard does not update, inspect the committed `data/status.json` and the latest per-node CSV on GitHub before debugging the frontend.
 
+## Firmware diagnostics (updated)
+
+Both board firmwares expose `GET /api/health`. In addition to the Wi-Fi, sensor and OLED flags, the response includes:
+
+- `price_http`: last HTTP status (negative values indicate client setup errors; `0` means no request has completed yet).
+- `price_error`: short reason for the last failed request or `OK`.
+- `price_age_ms`: milliseconds since the last successful ArzPulse snapshot (`0` before the first successful fetch).
+
+The S3 ticker shows the last known prices when available. Before the first successful fetch, it shows a short connection/error status instead of remaining indefinitely on a generic “waiting” message. The firmware keeps the last good price values on transient failures.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | What to check |
@@ -570,7 +580,7 @@ For hardware/network debugging:
 | OLED is completely blank | OLED power, common GND, SDA/SCL wiring, wrong GPIOs/address, or failed display module | Open Serial Monitor at 115200; inspect the I²C scan and `[OLED]` initialization lines. The firmware tries `0x3C` and `0x3D` and retries initialization. |
 | OLED shows Wi-Fi retry/offline | Placeholder/incorrect SSID or password, 5 GHz-only network, wrong static subnet/gateway, or weak signal | Set the real 2.4 GHz Wi-Fi credentials; check `NODE_IP`, gateway and subnet in the sketch. The firmware retries without rebooting. |
 | Board is connected but appears offline in PySmartHome-PC | The board IP does not match the PC URL, PC firewall/network isolation, or DHT22 has not produced a fresh reading | Open the exact `/api/status` URL from the PC. Match `192.168.1.119` / `192.168.1.115` to the two `PYSMART_ESP32_*_URL` settings. |
-| ArzPulse price shows `--` | No Internet access, raw GitHub unavailable, invalid JSON, or no first successful price snapshot since boot | Check Serial Monitor for `[ArzPulse]` messages. The board retries after one minute; local sensor readings continue. |
+| ArzPulse price shows `--` | No Internet access, raw GitHub unavailable, invalid JSON, or no first successful price snapshot since boot | Check Serial Monitor for `[ArzPulse]` messages. The board alternates Raw/Pages endpoints and retries with bounded backoff; local sensor readings continue. Check `/api/health` for `price_http`, `price_error`, and `price_age_ms`. |
 | ArzPulse price shows `~` | ArzPulse marks the derived quote stale, or the node has not refreshed its snapshot for more than ten minutes | Check the `derivedStale` flags and `timestamp` in ArzPulse `docs/data/latest.json`; the marker is intentional and does not mean the numeric value is zero. |
 | Both nodes appear offline | Wrong IP/subnet, Wi-Fi credentials, disconnected node, or PC firewall | Open each node `/api/status` from the PC and inspect Serial Monitor |
 | Node endpoint responds with 503 | DHT22 has not produced a valid reading yet | Wiring, power, pull-up, GPIO, and sensor readiness |
