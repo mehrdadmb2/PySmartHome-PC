@@ -1,3 +1,14 @@
+## 4.1.2 - 2026-11-24
+
+- Fixed market-source URLs: use the exact GitHub Contents API file endpoint first, followed by the raw file, jsDelivr, and ArzPulse source endpoints.
+- Removed the invalid PySmartHome GitHub Pages fallback for the repository-root `market/` folder; the `/tree/main/market` page is documented as HTML, not a JSON feed.
+- Seed the first-run market cache from the checked-in `market/esp32.json`; the PC can serve the last bundled snapshot immediately while online refresh retries.
+- Added GitHub Contents API Base64-envelope decoding and a PC-only emergency extractor for ArzPulse's `dollarPrice` and `gold18K` fields.
+- Enabled LAN binding by default for the ESP32 hardware profile, including automatic migration from an old loopback `.env`; loopback-only mode remains available with `PYSMART_HOME_LAN_ACCESS=0`.
+- Added source diagnostics, slower five-minute PC refresh aligned with Actions, GitHub token reuse for API reads, and a Private/LocalSubnet-only Windows Firewall helper.
+- Added retry/rebase protection when the market Action pushes while sensor-data sync is also publishing to `main`.
+- Disabled duplicate automatic firmware compilation in the standalone workflow; the ordered main CI remains the automatic compile gate.
+
 ## 4.1.1 - 2026-11-24
 
 - Fixed Arduino sketch prototype-order compilation by moving `MarketState` into per-board headers.

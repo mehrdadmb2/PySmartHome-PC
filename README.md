@@ -37,7 +37,7 @@
 - [OLED monitors and automated market snapshots](#oled-monitors-and-automated-market-snapshots)
 - [Software requirements](#software-requirements)
 - [Quick start on Windows](#quick-start-on-windows)
-- [Persian setup guide](راهنمای-راه‌اندازی-فارسی.md)
+- [Persian setup guide](SETUP_FA.md)
 - [Firmware setup](#firmware-setup)
 - [Configuration reference](#configuration-reference)
 - [Local, online, offline, and desktop modes](#local-online-offline-and-desktop-modes)
@@ -195,9 +195,11 @@ The workflow `.github/workflows/update-market-snapshot.yml` runs every five minu
 | `market/esp32.json` | Minimal combined payload used by both boards (two integer prices and stale flags) |
 | `market/status.json` | Snapshot generation time, source age, and output size |
 
-The PC service reads this small file from GitHub:
+The PC service reads this small file from the exact GitHub Contents API file endpoint first:
 
-`https://raw.githubusercontent.com/mehrdadmb2/PySmartHome-PC/main/market/esp32.json`
+`https://api.github.com/repos/mehrdadmb2/PySmartHome-PC/contents/market/esp32.json?ref=main`
+
+If that origin is temporarily unavailable, the PC tries the exact Raw GitHub file, jsDelivr mirror, and then ArzPulse's exact `docs/data/latest.json` endpoint (API, raw, CDN, and Pages). The `/tree/main/market` URL is only a GitHub HTML directory page and is never used as a JSON endpoint. The existing checked-in `market/esp32.json` is loaded as the initial cache before any network request.
 
 The ESP32 boards do **not** contact that URL. They read the PC's local endpoint instead:
 
@@ -209,11 +211,11 @@ That file contains no charts, history, other coins, or calculation inputs. The A
 
 ### PC proxy and firmware network isolation
 
-The Python service fetches the compact snapshot from GitHub every 60 seconds by default. It validates the version, price values, timestamp, and 512-byte size limit before replacing the in-memory cache. A failed fetch preserves the last good snapshot both in memory and in `data/market_snapshot_cache.json`, so a PC restart does not immediately remove prices. The proxy tries a primary Raw GitHub URL and a GitHub Pages fallback, applies bounded timeouts and exponential backoff, and marks snapshots stale based on their generation time. The local endpoint `/api/market` returns the validated cache; `/api/health` reports proxy readiness, source count, cache age, and the last proxy error.
+The Python service refreshes the compact snapshot every 300 seconds by default, aligned with the GitHub Action schedule. It validates the version, price values, timestamp, and 512-byte limit before replacing the in-memory cache. On first launch it seeds the cache from the checked-in `market/esp32.json`; afterward, a failed fetch preserves the last good snapshot in memory and in `data/market_snapshot_cache.json`, including across PC restarts. The source order is GitHub Contents API for the exact file, Raw GitHub, jsDelivr, then ArzPulse API/raw/CDN/Pages as an emergency PC-side extractor. The PC uses bounded connect/read timeouts, source-by-source fallback and exponential retry backoff, and marks old snapshots stale. The local endpoint `/api/market` returns the validated cache; `/api/health` and `/api/diagnostics` report proxy readiness, chosen source, cache age, and the last proxy error.
 
 The ESP32 makes a plain HTTP request to the PC over the trusted home LAN. That request runs in a low-priority FreeRTOS task pinned to the network core—not inside `loop()`. The task uses a fixed 384-byte ArduinoJson document, rejects unexpectedly large responses, applies short connection/read timeouts, and retries with backoff (30 seconds up to five minutes). It does not establish TLS, perform currency conversion, or parse the full ArzPulse JSON. The last good values remain in memory during temporary failures. The board compares the snapshot's `updated_at` marker before refreshing its freshness timer, so repeatedly receiving an unchanged old cache does not make stale prices look fresh.
 
-**PC LAN setup is required for prices:** set `PYSMART_HOME_HOST=0.0.0.0` in the PC's local `.env`, restart the service, reserve or identify the PC's LAN IP, and allow inbound TCP port 5000 only on the trusted Private network in Windows Firewall. Change `192.168.1.100` in both sketches to the actual PC LAN IP. Do not expose port 5000 to the public internet. If the PC service is down, the boards continue sensor/display operation but cannot receive new market prices.
+**PC LAN setup is required for prices:** version 4.1.2 enables LAN binding automatically for the ESP32 hardware profile, including migration from an older `.env` that still says `PYSMART_HOME_HOST=127.0.0.1`. Run `tools/enable_lan_firewall.ps1` as Administrator to allow TCP/5000 only from `LocalSubnet` on the Windows Private profile. Change `192.168.1.100` in both sketches to the actual PC LAN IP. Do not expose or port-forward port 5000 to the public internet. Set `PYSMART_HOME_LAN_ACCESS=0` to restore loopback-only mode.
 
 ### OLED and board recovery behaviour
 
@@ -279,13 +281,13 @@ The current firmware does not require NTPClient. Install the Adafruit and Arduin
 
 4. Start the backend by double-clicking `start_server.bat`, or run `python server.py` inside the activated environment.
 
-5. Open [http://127.0.0.1:5000](http://127.0.0.1:5000). This is the local-only default. No GitHub token is required for local sensor polling and dashboard operation.
+5. Open [http://127.0.0.1:5000](http://127.0.0.1:5000) on the PC. The same service is also bound to the LAN interface by default so ESP32 nodes can reach `/api/market`; restrict it with the supplied Private/LocalSubnet firewall rule. No GitHub token is required for local sensor polling and dashboard operation.
 
 6. To enable GitHub sync, set `PYSMART_GITHUB_TOKEN` as a user/system environment variable, or copy `config.example.txt` to `config.txt` and put your own token after `token `. Keep `config.txt` private; it is ignored by `.gitignore` in fresh clones.
 
 ### Run on the local network
 
-The server binds to `127.0.0.1` by default for safety. To let ESP32 boards access the PC market proxy, set `PYSMART_HOME_HOST=0.0.0.0` in `.env`, restart the service, and allow TCP port 5000 only on your trusted Windows Private network. In an elevated PowerShell window, create the rule with:
+Version 4.1.2 binds to `0.0.0.0` by default for the ESP32 hardware profile. The supplied firewall script permits TCP port 5000 only from `LocalSubnet` while Windows is on the Private profile. Run it from an elevated PowerShell window:
 
 ```powershell
 New-NetFirewallRule -DisplayName "PySmartHome-PC LAN" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 5000 -Profile Private
@@ -400,7 +402,7 @@ The Python collector accepts the firmware's `temp` key and the clearer `temperat
 3. Open **Actions → Update compact market snapshot → Run workflow** and run it once.
 4. Confirm that `market/esp32.json` and the categorized files appear in the repository.
 5. The scheduled workflow then refreshes the data every five minutes. No PAT, API key, or Cloudflare Worker is required for this feature.
-6. On the PC, copy `.env.example` to `.env` and set `PYSMART_HOME_HOST=0.0.0.0`. Restart the service. Allow inbound TCP 5000 only on the Windows Private profile.
+6. On the PC, copy `.env.example` to `.env` if needed. LAN binding is enabled by default; run `tools/enable_lan_firewall.ps1` as Administrator and restart the service.
 7. Find the PC's LAN IPv4 address with `ipconfig`. Replace `192.168.1.100` in both firmware sketches with that address, then verify `http://<PC-LAN-IP>:5000/api/market` from a browser on the LAN returns the compact JSON. The ESP32s will use this local endpoint, not GitHub directly.
 
 If a scheduled run fails, the last successful market JSON files are preserved. On the OLED, a `~` prefix indicates that the source marked a quote stale or that the board has not observed a newer snapshot for ten minutes.
@@ -415,7 +417,8 @@ Environment variables override built-in defaults. A `.env` file in the project/e
 
 | Variable | Default | Description |
 |---|---|---|
-| `PYSMART_HOME_HOST` | `127.0.0.1` | Bind address; use `0.0.0.0` only for intentional LAN access |
+| `PYSMART_HOME_LAN_ACCESS` | `1` | Enable LAN binding for ESP32 nodes; set `0` for loopback-only mode |
+| `PYSMART_HOME_HOST` | `0.0.0.0` | Bind address when LAN access is enabled |
 | `PYSMART_HOME_PORT` | `5000` | HTTP port |
 | `PYSMART_ESP32_1_URL` | `http://192.168.1.119/api/status` | Hub sensor endpoint |
 | `PYSMART_ESP32_S3_URL` | `http://192.168.1.115/api/status` | ESP32-S3 sensor endpoint |
@@ -423,8 +426,8 @@ Environment variables override built-in defaults. A `.env` file in the project/e
 | `PYSMART_HOME_PUBLISH_SECONDS` | `300` | GitHub publish interval, constrained to 30–86400 seconds |
 | `PYSMART_HOME_NODE_TIMEOUT` | `45` | Seconds after a successful sample before a node is stale/offline |
 | `PYSMART_HOME_HTTP_TIMEOUT` | `4` | HTTP request timeout for sensor calls |
-| `PYSMART_MARKET_SOURCE_URL` | PySmartHome-PC raw GitHub URL | Compact market snapshot source fetched by the PC |
-| `PYSMART_MARKET_REFRESH_SECONDS` | `60` | PC market-cache refresh interval |
+| `PYSMART_MARKET_SOURCE_URL` | GitHub Contents API file URL | Compact market snapshot source fetched by the PC; raw/CDN/ArzPulse origins are fallbacks |
+| `PYSMART_MARKET_REFRESH_SECONDS` | `300` | PC market-cache refresh interval (aligned with the five-minute Action) |
 | `PYSMART_MARKET_HTTP_TIMEOUT` | `5` | PC market-fetch timeout |
 | `PYSMART_TEMP_ALERT` | `35` | Temperature alert threshold in °C |
 | `PYSMART_GITHUB_USER` | `mehrdadmb2` | GitHub owner |

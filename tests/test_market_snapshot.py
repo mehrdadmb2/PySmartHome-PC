@@ -86,7 +86,7 @@ def test_download_source_retries_then_uses_fallback(monkeypatch):
             self.close()
 
     def fake_urlopen(request, timeout):
-        calls.append(request.full_url)
+        calls.append(request.full_url.split("?v=", 1)[0])
         if len(calls) <= 3:
             raise URLError("temporary timeout")
         return FakeResponse(json.dumps(payload).encode("utf-8"))
@@ -99,3 +99,19 @@ def test_download_source_retries_then_uses_fallback(monkeypatch):
     assert result["dollarPrice"] == 700_000_000
     assert calls[:3] == ["https://primary.invalid/latest.json"] * 3
     assert calls[3] == "https://fallback.invalid/latest.json"
+
+
+def test_decode_github_contents_api_base64_envelope():
+    import base64
+    from scripts.update_market_snapshot import decode_source_document
+
+    payload = {
+        "dollarPrice": 700_000_000,
+        "gold18K": 120_000_000,
+        "timestamp": "2026-11-24T11:59:00Z",
+        "derivedStale": {"dollar": False, "gold18K": False},
+    }
+    encoded = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
+    envelope = json.dumps({"encoding": "base64", "content": encoded}).encode("utf-8")
+    decoded = decode_source_document(envelope, "https://api.github.com/repos/owner/repo/contents/data.json")
+    assert decoded["dollarPrice"] == 700_000_000

@@ -277,7 +277,7 @@ bool fetchCompactMarketSnapshot() {
   http.setConnectTimeout(1200);
   http.setTimeout(1500);
   http.setReuse(false);
-  http.setUserAgent("PySmartHome-PC/4.1.1 ESP32-market-client");
+  http.setUserAgent("PySmartHome-PC/4.1.2 ESP32-market-client");
 
   // The local Flask endpoint explicitly sends Cache-Control: no-store.
   // Avoid dynamic URL construction so the repeated fetch does not fragment heap.

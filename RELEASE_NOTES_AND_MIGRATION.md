@@ -1,38 +1,23 @@
-## Version 4.1.1 reliability update
-
-- Arduino compile fix: `MarketState` now lives in `MarketState.h` beside each sketch.
-- Market proxy now restores a persistent last-good snapshot, supports a fallback origin, uses bounded retry/backoff, and marks old data stale.
-- GitHub Actions now runs in order: Python/frontend checks, firmware builds, then market refresh after successful CI; the five-minute market schedule remains independent.
-
 # PySmartHome-PC — Release and Migration Notes
 
-The latest prepared source bundle is **4.1.0**. The original 4.0.0 migration notes are retained below for historical upgrades.
+## Version 4.1.2 — GitHub source recovery and LAN proxy correction
 
-## What changed
+- Corrected market-source URLs against the live repositories. The PC now reads the exact `market/esp32.json` file through the GitHub Contents API first, then exact-file Raw GitHub and jsDelivr fallbacks. The `/tree/main/market` HTML page is never treated as JSON.
+- Added ArzPulse exact-file fallbacks on the PC only; the ESP32 never downloads the large ArzPulse document.
+- Seeded first-run market cache from the bundled compact file and retained persistent last-good cache across source outages and PC restarts.
+- Enabled LAN binding by default for the ESP32 profile, including compatibility with old `.env` files still specifying `127.0.0.1`; loopback-only mode remains available with `PYSMART_HOME_LAN_ACCESS=0`.
+- Added `/api/health` and `/api/diagnostics` source reporting, a Private/LocalSubnet firewall helper, and a PowerShell endpoint/listener diagnostic script.
+- Aligned the PC refresh cadence with the five-minute GitHub Action schedule and ordered the automatic CI → firmware compile → market update chain.
 
-- Preserved the existing sensor dashboard, charts, CSV history, outage-cycle planner, GitHub data publishing, and ESP32 firmware layout.
-- Added ten selectable visual themes, an improved combined-node chart path, a local CSV file manager, validated CSV import/export workflow, and a small diagnostics endpoint.
-- Added an installable PWA shell, conservative service-worker caching, a Windows desktop wrapper/build scripts, and a CI workflow.
-- Added GitHub Page Insights integration scoped to the production GitHub Pages origin/path; no GitHub write token is sent to the browser.
-- Standardized local configuration through `.env.example`, ignored local secret files, replaced firmware Wi-Fi values with placeholders, and added remote write checks for non-loopback clients.
-- Rewrote project documentation and added security/contribution/changelog files.
+### 4.1.2 validation status
 
-## Recommended update process
+- Python syntax compilation and market unit tests pass in the build environment.
+- Market-proxy helper smoke checks pass, including bundled-cache seeding and GitHub Contents API response decoding.
+- Workflow YAML and final ZIP integrity were checked. Full Flask integration tests, Arduino CLI compilation, and physical board testing still need confirmation from GitHub Actions and the actual hardware.
 
-1. Make a branch or download a backup of the existing repository first.
-2. For the historical 4.0.0 upgrade, the original replacement-package instructions applied. For the current 4.1.0 bundle, extract the full archive into a clean repository clone; the current bundle includes the existing `data/` CSV history.
-3. Do not add a `config.txt` file to Git. If the old repository tracked it, run from the local clone:
+---
 
-   ```powershell
-   git rm --cached --ignore-unmatch config.txt
-   ```
-
-   This removes the tracked copy from the next commit while leaving a local working copy alone if one exists. The `.gitignore` update prevents it from being added again accidentally.
-4. **Immediately revoke or rotate any GitHub token that was ever committed.** A new commit deleting a secret does not delete it from previous Git history, forks, cached copies, or clones. If old public firmware contained real Wi-Fi credentials, change the Wi-Fi password and update both local sketches before reflashing.
-5. Create a private local `.env` from `.env.example`; never upload `.env` or `config.txt`. Set the sensor addresses for your LAN. For publishing sensor snapshots, create a new fine-grained GitHub token restricted to this repository and only the required Contents read/write permission; store it in `PYSMART_GITHUB_TOKEN` in your local `.env` or OS environment.
-6. Review `Board-Code/esp32_hub/esp32_hub.ino` and `Board-Code/esp32_s3/esp32_s3.ino`. Put your actual SSID/password into your local copies, compile and flash them, but do not commit those credential changes.
-7. Commit and push the code/documentation changes. In GitHub repository **Settings → Pages**, select **Deploy from a branch**, branch `main`, folder `/(root)`.
-8. Confirm the public dashboard works at `https://mehrdadmb2.github.io/PySmartHome-PC/`. Visit it once, then inspect `https://mehrdadmb2.github.io/github-page-insights/` for platform ID `pysmarthome-pc-github-pages`. Analytics requires the referenced Page Insights Worker and database to be operational.
+The latest prepared source bundle is **4.1.2**. The earlier 4.1.0 and 4.0.0 notes are retained below for historical upgrades.onfirm the public dashboard works at `https://mehrdadmb2.github.io/PySmartHome-PC/`. Visit it once, then inspect `https://mehrdadmb2.github.io/github-page-insights/` for platform ID `pysmarthome-pc-github-pages`. Analytics requires the referenced Page Insights Worker and database to be operational.
 9. Install runtime packages and start `start_server.bat` to validate the local dashboard. Run `python -m pytest -q` in an environment with `requirements-dev.txt` installed. Only after this works, optionally build the desktop folder via `build_desktop.bat`.
 
 ## Important behavior boundaries

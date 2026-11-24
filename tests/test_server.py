@@ -20,7 +20,7 @@ def test_health_has_version_and_timezone(client):
     data = response.get_json()
     assert data["ok"] is True
     assert data["timezone"] == "Asia/Tehran"
-    assert data["version"] == "4.1.0"
+    assert data["version"] == "4.1.2"
 
 
 def test_sensor_payload_accepts_supported_firmware_keys():
@@ -140,6 +140,55 @@ def test_market_snapshot_validator_accepts_compact_schema():
 def test_market_snapshot_validator_rejects_bad_payloads(payload):
     with pytest.raises(ValueError):
         server.validate_market_snapshot(payload)
+
+
+def test_market_normalizer_accepts_arzpulse_latest_and_converts_irr_to_toman(monkeypatch):
+    monkeypatch.setattr(server, "MARKET_MAX_AGE_SECONDS", 900)
+    source = {
+        "dollarPrice": 2_900_000,
+        "gold18K": 249_000_000,
+        "timestamp": "2026-11-24T12:00:00Z",
+        "derivedStale": {"dollar": False, "gold18K": False},
+    }
+    result = server._normalize_market_document(source)
+    assert result["usd_toman"] == 290_000
+    assert result["gold18k_toman"] == 24_900_000
+    assert result["usd_stale"] is False
+    assert result["gold_stale"] is False
+
+
+def test_market_decoder_accepts_github_contents_base64_envelope():
+    import base64
+    import json
+    payload = {"v": 1, "updated_at": "2026-11-24T12:00:00Z", "usd_toman": 10, "gold18k_toman": 20}
+    encoded = base64.b64encode(json.dumps(payload).encode()).decode()
+    envelope = json.dumps({"encoding": "base64", "content": encoded}).encode()
+    decoded = server._decode_market_document(envelope, "https://api.github.com/repos/x/y/contents/a.json")
+    assert decoded["usd_toman"] == 10
+
+
+def test_market_cache_seeds_from_repository_market_file(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+    seed_root = tmp_path / "project"
+    market_dir = seed_root / "market"
+    market_dir.mkdir(parents=True)
+    payload = {
+        "v": 1,
+        "updated_at": "2026-11-24T12:00:00Z",
+        "usd_toman": 290_000,
+        "gold18k_toman": 24_900_000,
+        "usd_stale": False,
+        "gold_stale": False,
+    }
+    (market_dir / "esp32.json").write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(server, "BASE_DIR", seed_root)
+    monkeypatch.setattr(server, "ASSET_DIR", seed_root)
+    monkeypatch.setattr(server, "MARKET_CACHE_FILE", seed_root / "data" / "market_snapshot_cache.json")
+    monkeypatch.setattr(server, "market_snapshot", None)
+    assert server.load_market_cache() is True
+    assert server.market_snapshot["usd_toman"] == 290_000
+    assert server.market_snapshot_source == "market/esp32.json (bundled seed)"
 
 
 def test_market_endpoint_returns_503_until_cache_is_ready(client, monkeypatch):

@@ -15,3 +15,14 @@ invalid/missing source; the last known-good snapshot remains unchanged.
 The PC application downloads only `market/esp32.json`, validates it, caches the
 last good version, and exposes it at `/api/market` over the trusted local LAN. The
 ESP32 boards must use the PC endpoint, not GitHub and not the full ArzPulse feed.
+
+## Verified source endpoints
+
+The current updater reads ArzPulse's actual data file at `docs/data/latest.json`, not a repository directory listing. The PC-side proxy reads the precomputed local file at `market/esp32.json`.
+
+- PySmartHome compact snapshot: `https://api.github.com/repos/mehrdadmb2/PySmartHome-PC/contents/market/esp32.json?ref=main`
+- PySmartHome raw fallback: `https://raw.githubusercontent.com/mehrdadmb2/PySmartHome-PC/main/market/esp32.json`
+- ArzPulse source: `https://api.github.com/repos/mehrdadmb2/ArzPulse/contents/docs/data/latest.json?ref=main`
+- ArzPulse raw fallback: `https://raw.githubusercontent.com/mehrdadmb2/ArzPulse/main/docs/data/latest.json`
+
+Do not use `https://github.com/mehrdadmb2/PySmartHome-PC/tree/main/market` as a data URL; it serves HTML for the folder view.

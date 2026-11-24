@@ -1,6 +1,6 @@
 /* Offline-capable app shell. Live API responses are never cached as truth. */
 'use strict';
-const CACHE_NAME = 'pysmarthome-shell-v4.1.0';
+const CACHE_NAME = 'pysmarthome-shell-v4.1.2';
 const BASE_URL = new URL('./', self.location.href);
 const SHELL_FILES = ['', 'index.html', 'style.css', 'app.js', 'bg.js', 'analytics-loader.js', 'manifest.webmanifest', 'icon.svg'];
 

@@ -6,6 +6,7 @@ market/esp32.json; they never download or calculate the full ArzPulse dataset.
 """
 from __future__ import annotations
 
+import base64
 import json
 import math
 import os
@@ -20,11 +21,15 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_URLS = (
+    # Primary: GitHub Contents API (the PC's existing GitHub sync uses api.github.com).
+    "https://api.github.com/repos/mehrdadmb2/ArzPulse/contents/docs/data/latest.json?ref=main",
+    # Independent mirrors / delivery paths for the exact ArzPulse data file.
     "https://raw.githubusercontent.com/mehrdadmb2/ArzPulse/main/docs/data/latest.json",
+    "https://cdn.jsdelivr.net/gh/mehrdadmb2/ArzPulse@main/docs/data/latest.json",
     "https://mehrdadmb2.github.io/ArzPulse/data/latest.json",
 )
 MAX_SOURCE_AGE = timedelta(minutes=20)
-USER_AGENT = "PySmartHome-PC-MarketSnapshot/1.0 (+https://github.com/mehrdadmb2/PySmartHome-PC)"
+USER_AGENT = "PySmartHome-PC-MarketSnapshot/4.1.2 (+https://github.com/mehrdadmb2/PySmartHome-PC)"
 
 
 def parse_timestamp(value: Any) -> datetime | None:
@@ -150,33 +155,50 @@ def build_outputs(payload: dict[str, Any], now: datetime | None = None) -> dict[
     }
 
 
+def decode_source_document(raw: bytes, source_url: str) -> dict[str, Any]:
+    """Decode raw JSON or the Base64 content envelope returned by GitHub API."""
+    try:
+        value = json.loads(raw.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"invalid JSON: {exc}") from exc
+    if isinstance(value, dict) and value.get("encoding") == "base64" and isinstance(value.get("content"), str):
+        try:
+            decoded = base64.b64decode("".join(value["content"].split()), validate=True)
+            value = json.loads(decoded.decode("utf-8-sig"))
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"invalid GitHub Contents API payload: {exc}") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError("JSON root is not an object")
+    return value
+
+
 def download_source() -> dict[str, Any]:
-    """Fetch ArzPulse from redundant origins with bounded retries per origin."""
+    """Fetch ArzPulse using GitHub API first, then independent raw/CDN/Pages origins."""
     failures: list[str] = []
+    token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN") or ""
     for source_url in SOURCE_URLS:
+        is_api = "api.github.com/repos/" in source_url and "/contents/" in source_url
         for attempt in range(1, 4):
-            request = urllib.request.Request(
-                source_url,
-                headers={
-                    "User-Agent": USER_AGENT,
-                    "Accept": "application/json",
-                    "Cache-Control": "no-cache",
-                    "Accept-Encoding": "identity",
-                    "Connection": "close",
-                },
-                method="GET",
-            )
+            headers = {
+                "User-Agent": USER_AGENT,
+                "Accept": "application/vnd.github.raw+json" if is_api else "application/json",
+                "Cache-Control": "no-cache",
+                "Accept-Encoding": "identity",
+                "Connection": "close",
+            }
+            if is_api and token:
+                headers["Authorization"] = f"Bearer {token}"
+            url = source_url if is_api else f"{source_url}{'&' if '?' in source_url else '?'}v={int(time.time())}"
+            request = urllib.request.Request(url, headers=headers, method="GET")
             try:
-                with urllib.request.urlopen(request, timeout=12) as response:
+                with urllib.request.urlopen(request, timeout=10) as response:
                     if response.status != 200:
                         raise RuntimeError(f"HTTP {response.status}")
                     raw = response.read(2 * 1024 * 1024 + 1)
                 if len(raw) > 2 * 1024 * 1024:
                     raise RuntimeError("response exceeded the 2 MiB safety limit")
-                value = json.loads(raw.decode("utf-8"))
-                if not isinstance(value, dict):
-                    raise RuntimeError("JSON root is not an object")
-                # Validate required fields before accepting this origin.
+                value = decode_source_document(raw, source_url)
+                # Validate fields before accepting this origin.
                 positive_decimal(value.get("dollarPrice"), "dollarPrice")
                 positive_decimal(value.get("gold18K"), "gold18K")
                 if parse_timestamp(value.get("timestamp")) is None:
@@ -184,10 +206,12 @@ def download_source() -> dict[str, Any]:
                 print(f"Source OK: {source_url} (attempt {attempt}/3)")
                 return value
             except Exception as exc:
-                failures.append(f"{source_url} attempt {attempt}/3: {type(exc).__name__}: {exc}")
+                host = source_url.split("/")[2]
+                failures.append(f"{host} attempt {attempt}/3: {type(exc).__name__}: {exc}")
+                print(f"Source failed: {host} attempt {attempt}/3: {type(exc).__name__}: {exc}", file=sys.stderr)
                 if attempt < 3:
-                    time.sleep(attempt * 2)
-    details = " | ".join(failures[-6:])
+                    time.sleep(min(8, attempt * 2))
+    details = " | ".join(failures[-8:])
     raise RuntimeError(f"All ArzPulse origins failed: {details}")
 
 

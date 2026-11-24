@@ -2,7 +2,7 @@
 
 ## Supported deployment model
 
-PySmartHome-PC is designed for local use or a trusted private LAN, not direct exposure to the public internet. The default bind address is `127.0.0.1`. Setting `PYSMART_HOME_HOST=0.0.0.0` makes the service reachable on available network interfaces and should be done only with an appropriate host firewall and network segmentation.
+PySmartHome-PC is designed for local use or a trusted private LAN, not direct exposure to the public internet. Version 4.1.2 enables LAN binding by default for the ESP32 hardware profile. This binds Flask to all available interfaces; it does not itself create a router port-forward. Run `tools/enable_lan_firewall.ps1` as Administrator to restrict inbound TCP 5000 to the Windows Private profile and `LocalSubnet`. Set `PYSMART_HOME_LAN_ACCESS=0` to restore loopback-only operation.
 
 The ESP32 HTTP endpoints are unauthenticated. Do not port-forward them or the Python server to the internet.
 
@@ -25,4 +25,4 @@ Please avoid posting live credentials, network details, or sensitive telemetry i
 
 ## ESP32 market proxy on the local network
 
-When ESP32 nodes need the `/api/market` endpoint, the Python service must bind to a LAN-accessible interface (for example `PYSMART_HOME_HOST=0.0.0.0`). Restrict the Windows Firewall inbound rule for TCP 5000 to the trusted Private profile and do not forward this port from the internet. The market endpoint is read-only and contains public quote values; administrative write endpoints continue to require loopback or `PYSMART_HOME_ADMIN_KEY`. The board-to-PC HTTP request is intentionally local-LAN only; do not expose it on an untrusted network.
+When ESP32 nodes need the `/api/market` endpoint, the Python service binds to a LAN-accessible interface automatically. Restrict the Windows Firewall inbound rule for TCP 5000 to the trusted Private profile and `LocalSubnet`; do not forward this port from the internet. The market endpoint is read-only and contains public quote values; administrative write endpoints continue to require loopback or `PYSMART_HOME_ADMIN_KEY`. The board-to-PC HTTP request is intentionally local-LAN only; do not expose it on an untrusted network.

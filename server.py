@@ -21,6 +21,7 @@ import sys
 import tempfile
 import threading
 import time
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +55,18 @@ def load_local_env(path: Path) -> None:
             os.environ.setdefault(key, value)
 
 
+def looks_like_placeholder_secret(value: str) -> bool:
+    candidate = (value or "").strip()
+    lowered = candidate.lower()
+    if not candidate or "your_" in lowered or "placeholder" in lowered or lowered.startswith("replace_"):
+        return True
+    if lowered.startswith("ghp_") and set(candidate[4:]) <= {"x", "X"}:
+        return True
+    if lowered.startswith("github_pat_") and set(candidate.split("_", 2)[-1]) <= {"x", "X"}:
+        return True
+    return False
+
+
 def local_config_value(key: str) -> str:
     """Read a named value from the git-ignored legacy config.txt, if present."""
     try:
@@ -67,7 +80,7 @@ def local_config_value(key: str) -> str:
         name, sep, value = line.partition(" ")
         if sep and name.strip().lower() == key.lower():
             candidate = value.strip().strip('"').strip("'")
-            if candidate and "YOUR_" not in candidate and not candidate.lower().startswith("replace_"):
+            if candidate and not looks_like_placeholder_secret(candidate):
                 return candidate
     return ""
 
@@ -95,27 +108,59 @@ def env_float(name: str, default: float, minimum: float, maximum: float | None =
     return min(maximum, value) if maximum is not None else value
 
 # ----------------------------- configuration --------------------------------
-# Secure-by-default local operation. Set PYSMART_HOME_HOST=0.0.0.0 to allow LAN clients.
-HOST = os.getenv("PYSMART_HOME_HOST", "127.0.0.1").strip() or "127.0.0.1"
+# ESP32 nodes must reach the PC over the trusted home LAN. LAN binding is
+# enabled by default for this hardware profile; Windows Firewall must restrict
+# inbound TCP/5000 to the Private profile + LocalSubnet. Set
+# PYSMART_HOME_LAN_ACCESS=0 to restore loopback-only mode.
+def env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+LAN_ACCESS_ENABLED = env_bool("PYSMART_HOME_LAN_ACCESS", True)
+_requested_host = os.getenv("PYSMART_HOME_HOST", "").strip()
+if LAN_ACCESS_ENABLED:
+    HOST = _requested_host if _requested_host and _requested_host not in {"127.0.0.1", "localhost", "::1"} else "0.0.0.0"
+else:
+    HOST = _requested_host if _requested_host and _requested_host not in {"0.0.0.0", "::"} else "127.0.0.1"
 PORT = env_int("PYSMART_HOME_PORT", 5000, 1, 65535)
 POLL_INTERVAL = env_int("PYSMART_HOME_POLL_SECONDS", 10, 3, 3600)
 PUBLISH_INTERVAL = env_int("PYSMART_HOME_PUBLISH_SECONDS", 300, 30, 86400)
 NODE_TIMEOUT = env_int("PYSMART_HOME_NODE_TIMEOUT", 45, 20, 86400)
 HTTP_TIMEOUT = env_int("PYSMART_HOME_HTTP_TIMEOUT", 4, 1, 60)
-MARKET_REFRESH_SECONDS = env_int("PYSMART_MARKET_REFRESH_SECONDS", 60, 15, 3600)
-MARKET_HTTP_TIMEOUT = env_int("PYSMART_MARKET_HTTP_TIMEOUT", 8, 5, 30)
-MARKET_CONNECT_TIMEOUT = env_int("PYSMART_MARKET_CONNECT_TIMEOUT", 4, 1, 15)
+MARKET_REFRESH_SECONDS = env_int("PYSMART_MARKET_REFRESH_SECONDS", 300, 60, 3600)
+MARKET_HTTP_TIMEOUT = env_int("PYSMART_MARKET_HTTP_TIMEOUT", 5, 3, 20)
+MARKET_CONNECT_TIMEOUT = env_int("PYSMART_MARKET_CONNECT_TIMEOUT", 2, 1, 10)
 MARKET_MAX_AGE_SECONDS = env_int("PYSMART_MARKET_MAX_AGE_SECONDS", 900, 60, 86400)
-MARKET_SOURCE_URL = os.getenv(
-    "PYSMART_MARKET_SOURCE_URL",
+# The primary endpoint is GitHub's Contents API for the exact compact file.
+# It is intentionally first: the PC's GitHub Contents API sync already uses
+# api.github.com, while raw.githubusercontent.com may be blocked or slow on
+# some networks. Each fallback still targets a *file*, never a /tree/ directory.
+MARKET_API_URL = "https://api.github.com/repos/mehrdadmb2/PySmartHome-PC/contents/market/esp32.json?ref=main"
+MARKET_SOURCE_URL = os.getenv("PYSMART_MARKET_SOURCE_URL", MARKET_API_URL).strip() or MARKET_API_URL
+_DEFAULT_MARKET_URLS = (
+    MARKET_API_URL,
     "https://raw.githubusercontent.com/mehrdadmb2/PySmartHome-PC/main/market/esp32.json",
-).strip()
-MARKET_SOURCE_URLS = [MARKET_SOURCE_URL]
-for _url in os.getenv(
-    "PYSMART_MARKET_FALLBACK_URLS",
-    "https://mehrdadmb2.github.io/PySmartHome-PC/market/esp32.json",
-).split(","):
+    "https://cdn.jsdelivr.net/gh/mehrdadmb2/PySmartHome-PC@main/market/esp32.json",
+    "https://api.github.com/repos/mehrdadmb2/ArzPulse/contents/docs/data/latest.json?ref=main",
+    "https://raw.githubusercontent.com/mehrdadmb2/ArzPulse/main/docs/data/latest.json",
+    "https://cdn.jsdelivr.net/gh/mehrdadmb2/ArzPulse@main/docs/data/latest.json",
+    "https://mehrdadmb2.github.io/ArzPulse/data/latest.json",
+)
+MARKET_SOURCE_URLS: list[str] = []
+for _url in (MARKET_API_URL, MARKET_SOURCE_URL):
+    if _url and _url not in MARKET_SOURCE_URLS:
+        MARKET_SOURCE_URLS.append(_url)
+for _url in os.getenv("PYSMART_MARKET_FALLBACK_URLS", "").split(","):
     _url = _url.strip()
+    # This was an incorrect Pages fallback: PySmartHome Pages serves the site,
+    # not necessarily the repository-root market folder. Never retry it.
+    if "mehrdadmb2.github.io/PySmartHome-PC/market/" in _url:
+        continue
+    if _url and _url not in MARKET_SOURCE_URLS:
+        MARKET_SOURCE_URLS.append(_url)
+for _url in _DEFAULT_MARKET_URLS:
     if _url and _url not in MARKET_SOURCE_URLS:
         MARKET_SOURCE_URLS.append(_url)
 MARKET_CACHE_FILE = DATA_DIR / "market_snapshot_cache.json"
@@ -131,6 +176,8 @@ GITHUB_USER = os.getenv("PYSMART_GITHUB_USER", "mehrdadmb2")
 GITHUB_REPO = os.getenv("PYSMART_GITHUB_REPO", "PySmartHome-PC")
 GITHUB_BRANCH = os.getenv("PYSMART_GITHUB_BRANCH", "main")
 GITHUB_TOKEN = os.getenv("PYSMART_GITHUB_TOKEN", "").strip() or local_config_value("token")
+if looks_like_placeholder_secret(GITHUB_TOKEN):
+    GITHUB_TOKEN = ""
 
 BOARDS = {
     "esp32_1": {"name": "Room 1 • Hub", "short": "Room 1", "url": ESP32_HUB_URL},
@@ -184,6 +231,7 @@ market_lock = threading.RLock()
 market_snapshot: dict[str, Any] | None = None
 market_snapshot_fetched_at = 0.0
 market_snapshot_error = "not fetched yet"
+market_snapshot_source = "none"
 market_last_attempt_at = 0.0
 market_consecutive_failures = 0
 
@@ -636,6 +684,7 @@ def _persist_market_cache(payload: dict[str, Any], fetched_at: float) -> None:
     wrapper = {"saved_at": fetched_at, "snapshot": payload}
     temporary = MARKET_CACHE_FILE.with_suffix(".json.tmp")
     try:
+        MARKET_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
         temporary.write_text(json.dumps(wrapper, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         os.replace(temporary, MARKET_CACHE_FILE)
     except OSError as exc:
@@ -646,9 +695,95 @@ def _persist_market_cache(payload: dict[str, Any], fetched_at: float) -> None:
             pass
 
 
+def _parse_market_datetime(value: Any) -> dt.datetime:
+    if isinstance(value, bool) or value is None:
+        raise ValueError("missing market timestamp")
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+        if not math.isfinite(numeric) or numeric <= 0:
+            raise ValueError("invalid market timestamp")
+        if numeric > 10_000_000_000:
+            numeric /= 1000.0
+        return dt.datetime.fromtimestamp(numeric, tz=dt.timezone.utc)
+    parsed = dt.datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def _decode_market_document(raw: bytes, source_url: str) -> dict[str, Any]:
+    """Decode either raw JSON or GitHub Contents API's Base64 envelope."""
+    try:
+        value = json.loads(raw.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid JSON response: {exc}") from exc
+    if isinstance(value, dict) and value.get("encoding") == "base64" and isinstance(value.get("content"), str):
+        try:
+            decoded = base64.b64decode("".join(value["content"].split()), validate=True)
+            value = json.loads(decoded.decode("utf-8-sig"))
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"invalid GitHub Contents Base64 payload: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError("market response root is not a JSON object")
+    return value
+
+
+def _normalize_market_document(value: dict[str, Any]) -> dict[str, Any]:
+    """Accept the compact PySmartHome schema or derive it from ArzPulse on the PC."""
+    if value.get("v") == 1:
+        return validate_market_snapshot(value)
+
+    # Emergency PC-side fallback. The normal path is the tiny precomputed
+    # market/esp32.json. If that file cannot be reached, this PC (not the ESP32)
+    # can extract the two required fields from ArzPulse's full feed.
+    if "dollarPrice" not in value or "gold18K" not in value:
+        raise ValueError("unsupported market source: expected compact snapshot or ArzPulse latest.json")
+    def to_toman(raw_value: Any, field: str) -> int:
+        if isinstance(raw_value, bool) or raw_value is None:
+            raise ValueError(f"invalid ArzPulse {field}")
+        try:
+            amount = Decimal(str(raw_value).strip())
+        except (InvalidOperation, ValueError, AttributeError):
+            raise ValueError(f"invalid ArzPulse {field}") from None
+        if not amount.is_finite() or amount <= 0:
+            raise ValueError(f"invalid ArzPulse {field}")
+        converted = int((amount / Decimal(10)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        if converted <= 0 or converted > 10**15:
+            raise ValueError(f"out-of-range ArzPulse {field}")
+        return converted
+
+    source_time = _parse_market_datetime(value.get("timestamp"))
+    now_utc = dt.datetime.now(dt.timezone.utc)
+    too_old = now_utc - source_time > dt.timedelta(seconds=MARKET_MAX_AGE_SECONDS) or source_time - now_utc > dt.timedelta(minutes=5)
+    stale_flags = value.get("derivedStale") if isinstance(value.get("derivedStale"), dict) else {}
+    normalized = {
+        "v": 1,
+        "updated_at": source_time.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "usd_toman": to_toman(value.get("dollarPrice"), "dollarPrice"),
+        "gold18k_toman": to_toman(value.get("gold18K"), "gold18K"),
+        "usd_stale": bool(stale_flags.get("dollar", True)) or too_old,
+        "gold_stale": bool(stale_flags.get("gold18K", True)) or too_old,
+    }
+    return validate_market_snapshot(normalized)
+
+
+def _market_source_headers(source_url: str) -> dict[str, str]:
+    is_api = "api.github.com/repos/" in source_url and "/contents/" in source_url
+    headers = {
+        "Accept": "application/vnd.github.raw+json" if is_api else "application/json",
+        "Cache-Control": "no-cache",
+        "Accept-Encoding": "identity",
+        "User-Agent": "PySmartHome-PC/4.1.2 market-proxy",
+        "Connection": "close",
+    }
+    if is_api and GITHUB_TOKEN:
+        headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+    return headers
+
+
 def load_market_cache() -> bool:
-    """Restore a previously validated snapshot before the network worker starts."""
-    global market_snapshot, market_snapshot_fetched_at, market_snapshot_error
+    """Restore persisted cache, or seed from the repository's bundled market file."""
+    global market_snapshot, market_snapshot_fetched_at, market_snapshot_error, market_snapshot_source
     try:
         wrapper = json.loads(MARKET_CACHE_FILE.read_text(encoding="utf-8"))
         payload = validate_market_snapshot(wrapper.get("snapshot"))
@@ -660,60 +795,88 @@ def load_market_cache() -> bool:
             market_snapshot_fetched_at = saved_at
             age = max(0, int(time.time() - saved_at))
             market_snapshot_error = "Restored local cache" if age <= MARKET_MAX_AGE_SECONDS else "Restored stale local cache"
+            market_snapshot_source = "data/market_snapshot_cache.json"
         logger.info("Restored local market cache • age=%ss", age, extra={"category": "MARKET"})
         return True
     except FileNotFoundError:
-        return False
+        pass
     except Exception as exc:
         logger.warning("Ignoring invalid local market cache • %s", exc, extra={"category": "MARKET"})
-        return False
+
+    # Seed from the checked-in market output so first startup can serve prices
+    # immediately, even before the first online fetch succeeds.
+    candidates = (BASE_DIR / "market" / "esp32.json", ASSET_DIR / "market" / "esp32.json")
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            raw = candidate.read_bytes()
+            if not raw or len(raw) > 512:
+                raise ValueError("bundled ESP32 snapshot is empty or exceeds 512 bytes")
+            payload = validate_market_snapshot(_decode_market_document(raw, str(candidate)))
+            fetched_at = time.time()
+            with market_lock:
+                market_snapshot = payload
+                market_snapshot_fetched_at = fetched_at
+                market_snapshot_error = "Seeded from bundled market/esp32.json; checking online source"
+                market_snapshot_source = "market/esp32.json (bundled seed)"
+            _persist_market_cache(payload, fetched_at)
+            logger.info("Seeded market cache from bundled market/esp32.json • bytes=%s", len(raw), extra={"category": "MARKET"})
+            return True
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            logger.warning("Could not seed market cache from %s • %s", candidate, exc, extra={"category": "MARKET"})
+    return False
 
 
 def refresh_market_snapshot_once() -> bool:
-    """Fetch a tiny snapshot from primary/fallback origins; never discard last-good data."""
+    """Fetch a compact snapshot through resilient GitHub/CDN origins; keep last-good data."""
     global market_snapshot, market_snapshot_fetched_at, market_snapshot_error
-    global market_last_attempt_at, market_consecutive_failures
+    global market_snapshot_source, market_last_attempt_at, market_consecutive_failures
     market_last_attempt_at = time.time()
     errors: list[str] = []
     for source_url in MARKET_SOURCE_URLS:
         try:
+            is_api = "api.github.com/repos/" in source_url and "/contents/" in source_url
+            params = None if is_api else {"v": int(time.time())}
             with requests.get(
                 source_url,
-                params={"v": int(time.time())},
-                headers={
-                    "Accept": "application/json",
-                    "Cache-Control": "no-cache",
-                    "Accept-Encoding": "identity",
-                    "User-Agent": "PySmartHome-PC/4.1.1 market-proxy",
-                    "Connection": "close",
-                },
+                params=params,
+                headers=_market_source_headers(source_url),
                 timeout=(MARKET_CONNECT_TIMEOUT, MARKET_HTTP_TIMEOUT),
                 stream=True,
             ) as response:
                 response.raise_for_status()
                 content_length = response.headers.get("Content-Length")
-                if content_length and int(content_length) > 512:
-                    raise ValueError("market snapshot exceeds 512 bytes")
-                raw = response.raw.read(513)
-                if len(raw) > 512:
-                    raise ValueError("market snapshot exceeds 512 bytes")
-            payload = validate_market_snapshot(json.loads(raw.decode("utf-8")))
+                if content_length and int(content_length) > 2 * 1024 * 1024:
+                    raise ValueError("market source exceeds the 2 MiB safety limit")
+                raw = response.raw.read(2 * 1024 * 1024 + 1)
+                if len(raw) > 2 * 1024 * 1024:
+                    raise ValueError("market source exceeds the 2 MiB safety limit")
+            document = _decode_market_document(raw, source_url)
+            payload = _normalize_market_document(document)
             fetched_at = time.time()
             with market_lock:
                 market_snapshot = payload
                 market_snapshot_fetched_at = fetched_at
                 market_snapshot_error = "OK"
+                market_snapshot_source = source_url
                 market_consecutive_failures = 0
             _persist_market_cache(payload, fetched_at)
             logger.info(
-                "Market snapshot refreshed • source=%s • USD=%s T • Gold18K=%s T",
+                "Market snapshot refreshed • source=%s • USD=%s T • Gold18K=%s T • stale=%s/%s",
                 source_url.split("/")[2], payload["usd_toman"], payload["gold18k_toman"],
-                extra={"category": "MARKET"},
+                payload["usd_stale"], payload["gold_stale"], extra={"category": "MARKET"},
             )
             return True
         except Exception as exc:
-            errors.append(f"{source_url.split('/')[2]}: {str(exc)[:100]}")
-    detail = " | ".join(errors)[:350] or "no market source configured"
+            host = source_url.split("/")[2] if "://" in source_url else "local"
+            errors.append(f"{host}: {type(exc).__name__}: {str(exc)[:110]}")
+    detail = " | ".join(errors)[:650] or "no market source configured"
     with market_lock:
         market_snapshot_error = detail
         market_consecutive_failures += 1
@@ -763,7 +926,7 @@ def start_worker() -> None:
         load_market_cache()
         market_worker_started = True
         threading.Thread(target=market_worker_loop, name="pysmarthome-market", daemon=True).start()
-        logger.info("Market proxy worker started • refresh=%ss", MARKET_REFRESH_SECONDS, extra={"category": "MARKET"})
+        logger.info("Market proxy worker started • refresh=%ss • sources=%s", MARKET_REFRESH_SECONDS, len(MARKET_SOURCE_URLS), extra={"category": "MARKET"})
 
 # ------------------------------- flask --------------------------------------
 app = Flask(__name__)
@@ -892,10 +1055,11 @@ def api_health():
         market_ready = market_snapshot is not None
         market_age = max(0, int(time.time() - market_snapshot_fetched_at)) if market_snapshot_fetched_at else None
         market_error = market_snapshot_error
+        market_source = market_snapshot_source
     return jsonify({
         "ok": True,
         "service": "PySmartHome-PC",
-        "version": "4.1.1",
+        "version": "4.1.2",
         "schema_version": 4,
         "time": iso_now(),
         "timezone": "Asia/Tehran",
@@ -904,6 +1068,7 @@ def api_health():
         "market_proxy_ready": market_ready,
         "market_proxy_age_seconds": market_age,
         "market_proxy_error": market_error,
+        "market_proxy_source": market_source,
         "market_source_count": len(MARKET_SOURCE_URLS),
         "market_cache_persisted": MARKET_CACHE_FILE.is_file(),
         "market_lan_access_enabled": HOST in {"0.0.0.0", "::"},
@@ -923,8 +1088,9 @@ def api_diagnostics():
             market_ready = market_snapshot is not None
             market_age = max(0, int(time.time() - market_snapshot_fetched_at)) if market_snapshot_fetched_at else None
             market_error = market_snapshot_error
+            market_source = market_snapshot_source
         return jsonify({
-            "version": "4.1.1",
+            "version": "4.1.2",
             "generated_at": iso_now(),
             "uptime_seconds": max(0, int(time.time() - runtime["started_at"])),
             "poll_cycles": runtime["poll_cycles"],
@@ -935,6 +1101,7 @@ def api_diagnostics():
             "market_proxy_ready": market_ready,
             "market_proxy_age_seconds": market_age,
             "market_proxy_error": market_error,
+            "market_proxy_source": market_source,
             "market_source_count": len(MARKET_SOURCE_URLS),
             "market_cache_persisted": MARKET_CACHE_FILE.is_file(),
             "market_max_age_seconds": MARKET_MAX_AGE_SECONDS,
@@ -1165,9 +1332,9 @@ if __name__ == "__main__":
     logger.info("Room 2 endpoint: %s", ESP32_S3_URL, extra={"category": "CFG"})
     logger.info("Iran time zone: Asia/Tehran (UTC+03:30)", extra={"category": "TIME"})
     logger.info("GitHub sync: %s", "enabled" if github_enabled() else "disabled", extra={"category": "SYNC"})
-    logger.info("Network exposure: %s", "LAN-enabled; protect the PC firewall and set an admin key" if HOST in {"0.0.0.0", "::"} else "local-only", extra={"category": "SEC"})
+    logger.info("Network exposure: %s", "LAN bind enabled • run tools/enable_lan_firewall.ps1 as Administrator" if HOST in {"0.0.0.0", "::"} else "loopback-only", extra={"category": "SEC"})
     if HOST not in {"0.0.0.0", "::"}:
-        logger.warning("Market LAN access is disabled • ESP32 nodes cannot reach this PC until PYSMART_HOME_HOST=0.0.0.0 is set in .env", extra={"category": "MARKET"})
+        logger.warning("Market LAN access is disabled • set PYSMART_HOME_LAN_ACCESS=1 and restart", extra={"category": "MARKET"})
     logger.info("Outage reference: today 13:00–15:00 • Friday skipped", extra={"category": "OUTAGE"})
     start_worker()
     app.run(host=HOST, port=PORT, debug=False, threaded=True)
