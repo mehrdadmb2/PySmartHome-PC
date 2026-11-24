@@ -4,11 +4,10 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
-  push:
+  workflow_run:
+    workflows: ["Project CI and firmware verification"]
+    types: [completed]
     branches: [main]
-    paths:
-      - "scripts/update_market_snapshot.py"
-      - ".github/workflows/update-market-snapshot.yml"
 
 permissions:
   contents: write
@@ -19,54 +18,54 @@ concurrency:
 
 jobs:
   update:
-    name: Fetch, normalize and publish small JSON files
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: Fetch, validate and publish compact prices
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 8
     steps:
-      - name: Checkout repository
+      - name: Checkout default branch
         uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Generate categorized snapshots
+      - name: Fetch and generate market snapshots (retry + fallback sources)
         run: python scripts/update_market_snapshot.py
-
-      - name: Validate generated JSON
+      - name: Validate generated snapshots and freshness metadata
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          files = [
+          paths = [
               Path("market/esp32.json"),
               Path("market/currencies/usd.json"),
               Path("market/metals/gold_18k_1g.json"),
               Path("market/status.json"),
           ]
-          for path in files:
-              payload = json.loads(path.read_text(encoding="utf-8"))
-              assert isinstance(payload, dict), f"{path} is not an object"
-              print(f"{path}: valid ({path.stat().st_size} bytes)")
+          for path in paths:
+              data = json.loads(path.read_text(encoding="utf-8"))
+              assert isinstance(data, dict), f"Invalid JSON object: {path}"
+              print(f"PASS {path}: {path.stat().st_size} bytes")
           board = json.loads(Path("market/esp32.json").read_text(encoding="utf-8"))
           assert board.get("v") == 1
-          assert int(board["usd_toman"]) > 0
-          assert int(board["gold18k_toman"]) > 0
+          assert 0 < int(board["usd_toman"]) < 10**12
+          assert 0 < int(board["gold18k_toman"]) < 10**12
           assert Path("market/esp32.json").stat().st_size <= 512
+          print("PASS board payload <= 512 bytes")
           PY
-
-      - name: Commit updated market data
+      - name: Commit and push only when data changed
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add market/
           if git diff --cached --quiet; then
-            echo "No market data changes to commit."
-          else
-            git commit -m "data: refresh compact market snapshots"
-            git push origin HEAD:main
+            echo "No market changes; keeping the current snapshot."
+            exit 0
           fi
+          git commit -m "data: refresh compact market snapshots [skip ci]"
+          git push origin HEAD:main

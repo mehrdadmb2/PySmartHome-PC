@@ -1,26 +1,46 @@
-name: Python and project checks
+name: Project CI and firmware verification
 
 on:
   push:
     branches: [main]
+    paths:
+      - "server.py"
+      - "desktop_app.py"
+      - "scripts/**"
+      - "tests/**"
+      - "Board-Code/**"
+      - "requirements*.txt"
+      - "*.js"
+      - "*.html"
+      - "*.css"
+      - ".github/workflows/**"
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: project-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  tests:
+  python-quality:
+    name: Python tests and frontend checks
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install test dependencies
-        run: python -m pip install -r requirements.txt -r requirements-dev.txt
-      - name: Run automated tests
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run tests
         run: python -m pytest -q
       - name: Compile Python sources
         run: python -m compileall -q server.py desktop_app.py scripts tests
@@ -30,3 +50,29 @@ jobs:
           node --check bg.js
           node --check analytics-loader.js
           node --check sw.js
+
+  firmware-build:
+    name: Compile ESP32 Hub and ESP32-S3
+    needs: python-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+      - name: Configure ESP32 core
+        run: |
+          arduino-cli config init
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.0.7
+      - name: Install pinned Arduino libraries
+        run: |
+          arduino-cli lib install "DHT sensor library"
+          arduino-cli lib install "Adafruit Unified Sensor"
+          arduino-cli lib install "Adafruit SSD1306"
+          arduino-cli lib install "Adafruit GFX Library"
+          arduino-cli lib install "ArduinoJson@6.21.5"
+      - name: Compile ESP32 Hub
+        run: arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all Board-Code/esp32_hub
+      - name: Compile ESP32-S3
+        run: arduino-cli compile --fqbn esp32:esp32:esp32s3 --warnings all Board-Code/esp32_s3
