@@ -1,0 +1,43 @@
+name: ESP32 firmware compile checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Board-Code/**"
+      - ".github/workflows/firmware-build.yml"
+  pull_request:
+    paths:
+      - "Board-Code/**"
+      - ".github/workflows/firmware-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Arduino CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+          sudo install bin/arduino-cli /usr/local/bin/arduino-cli
+      - name: Configure ESP32 platform
+        run: |
+          arduino-cli config init
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.0.7
+      - name: Install Arduino libraries
+        run: |
+          arduino-cli lib install "DHT sensor library"
+          arduino-cli lib install "Adafruit Unified Sensor"
+          arduino-cli lib install "Adafruit SSD1306"
+          arduino-cli lib install "Adafruit GFX Library"
+          arduino-cli lib install "ArduinoJson@6.21.5"
+      - name: Compile ESP32 Hub
+        run: arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all Board-Code/esp32_hub
+      - name: Compile ESP32-S3
+        run: arduino-cli compile --fqbn esp32:esp32:esp32s3 --warnings all Board-Code/esp32_s3

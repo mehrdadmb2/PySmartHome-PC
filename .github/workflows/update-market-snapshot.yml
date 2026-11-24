@@ -1,0 +1,72 @@
+name: Update compact market snapshot
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/update_market_snapshot.py"
+      - ".github/workflows/update-market-snapshot.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-market-snapshot
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Fetch, normalize and publish small JSON files
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate categorized snapshots
+        run: python scripts/update_market_snapshot.py
+
+      - name: Validate generated JSON
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          files = [
+              Path("market/esp32.json"),
+              Path("market/currencies/usd.json"),
+              Path("market/metals/gold_18k_1g.json"),
+              Path("market/status.json"),
+          ]
+          for path in files:
+              payload = json.loads(path.read_text(encoding="utf-8"))
+              assert isinstance(payload, dict), f"{path} is not an object"
+              print(f"{path}: valid ({path.stat().st_size} bytes)")
+          board = json.loads(Path("market/esp32.json").read_text(encoding="utf-8"))
+          assert board.get("v") == 1
+          assert int(board["usd_toman"]) > 0
+          assert int(board["gold18k_toman"]) > 0
+          assert Path("market/esp32.json").stat().st_size <= 512
+          PY
+
+      - name: Commit updated market data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add market/
+          if git diff --cached --quiet; then
+            echo "No market data changes to commit."
+          else
+            git commit -m "data: refresh compact market snapshots"
+            git push origin HEAD:main
+          fi
