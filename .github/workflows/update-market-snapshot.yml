@@ -32,7 +32,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Fetch and generate market snapshots (retry + fallback sources)
+      - name: Fetch and generate market snapshots (API + raw + CDN + Pages fallbacks)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/update_market_snapshot.py
       - name: Validate generated snapshots and freshness metadata
         run: |
@@ -68,4 +70,16 @@ jobs:
             exit 0
           fi
           git commit -m "data: refresh compact market snapshots [skip ci]"
-          git push origin HEAD:main
+          # A local sensor-data publish can race this workflow. Rebase and retry
+          # instead of losing a valid market refresh on a non-fast-forward push.
+          for attempt in 1 2 3; do
+            git pull --rebase origin main
+            if git push origin HEAD:main; then
+              echo "Market snapshot pushed successfully."
+              exit 0
+            fi
+            echo "Push attempt ${attempt}/3 failed; retrying after a short delay."
+            sleep $((attempt * 3))
+          done
+          echo "::error::Could not publish market snapshot after three push attempts."
+          exit 1

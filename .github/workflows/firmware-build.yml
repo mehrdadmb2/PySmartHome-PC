@@ -1,15 +1,8 @@
 name: ESP32 firmware compile checks
 
+# Manual compile-only diagnostic. Automatic firmware compilation is already
+# part of the ordered Project CI and firmware verification workflow.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "Board-Code/**"
-      - ".github/workflows/firmware-build.yml"
-  pull_request:
-    paths:
-      - "Board-Code/**"
-      - ".github/workflows/firmware-build.yml"
   workflow_dispatch:
 
 permissions:
