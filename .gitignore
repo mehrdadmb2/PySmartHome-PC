@@ -1,0 +1,21 @@
+# Local secrets and configuration
+config.txt
+.env
+.env.*
+!.env.example
+
+# Python runtime/build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/
+*.spec
+
+# Local logs and temporary files
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
