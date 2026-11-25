@@ -1,13 +1,12 @@
 name: Update compact market snapshot
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
+  # Primary trigger: ArzPulse notifies this repository after publishing prices.
+  repository_dispatch:
+    types: [arzpulse_prices_updated]
+
+  # Manual recovery / forced refresh.
   workflow_dispatch:
-  workflow_run:
-    workflows: ["Project CI and firmware verification"]
-    types: [completed]
-    branches: [main]
 
 permissions:
   contents: write
@@ -18,29 +17,45 @@ concurrency:
 
 jobs:
   update:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
-    name: Fetch, validate and publish compact prices
+    name: Import latest ArzPulse data and publish compact snapshots
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
-      - name: Checkout default branch
+      - name: Checkout latest PySmartHome main
         uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
+
+      - name: Show trigger metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Trigger: $GITHUB_EVENT_NAME"
+          if [[ "$GITHUB_EVENT_NAME" == "repository_dispatch" ]]; then
+            echo "Source: $(jq -r '.client_payload.source // "unknown"' "$GITHUB_EVENT_PATH")"
+            echo "ArzPulse source timestamp: $(jq -r '.client_payload.source_timestamp // "not supplied"' "$GITHUB_EVENT_PATH")"
+            echo "ArzPulse source run: $(jq -r '.client_payload.source_run_id // "not supplied"' "$GITHUB_EVENT_PATH")"
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Fetch and generate market snapshots (API + raw + CDN + Pages fallbacks)
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Fetch, validate and convert the latest ArzPulse snapshot
+        # The ArzPulse repository is public. Do not pass the PySmartHome write token
+        # to another repository's public source endpoint.
         run: python scripts/update_market_snapshot.py
-      - name: Validate generated snapshots and freshness metadata
+
+      - name: Validate generated snapshots and source freshness
+        shell: bash
         run: |
+          set -euo pipefail
           python - <<'PY'
           import json
           from pathlib import Path
+
           paths = [
               Path("market/esp32.json"),
               Path("market/currencies/usd.json"),
@@ -51,35 +66,58 @@ jobs:
               data = json.loads(path.read_text(encoding="utf-8"))
               assert isinstance(data, dict), f"Invalid JSON object: {path}"
               print(f"PASS {path}: {path.stat().st_size} bytes")
+
           board = json.loads(Path("market/esp32.json").read_text(encoding="utf-8"))
-          assert board.get("v") == 1
-          assert 0 < int(board["usd_toman"]) < 10**12
-          assert 0 < int(board["gold18k_toman"]) < 10**12
-          assert Path("market/esp32.json").stat().st_size <= 512
-          print("PASS board payload <= 512 bytes")
+          status = json.loads(Path("market/status.json").read_text(encoding="utf-8"))
+          assert board.get("v") == 1, "Unsupported ESP32 schema"
+          assert 0 < int(board["usd_toman"]) < 10**12, "Invalid USD value"
+          assert 0 < int(board["gold18k_toman"]) < 10**12, "Invalid 18K gold value"
+          assert Path("market/esp32.json").stat().st_size <= 512, "ESP32 payload exceeds 512 bytes"
+          assert int(status.get("source_age_seconds", 10**9)) <= 1200, "ArzPulse source is older than 20 minutes"
+          print("PASS ESP32 payload <= 512 bytes")
+          print(f"PASS ArzPulse timestamp: {status['source_timestamp']}")
           PY
-      - name: Commit and push only when data changed
+
+      - name: Commit and push market snapshots with conflict-safe retry
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add market/
           if git diff --cached --quiet; then
-            echo "No market changes; keeping the current snapshot."
+            echo "Market snapshots are already current; no commit is needed."
             exit 0
           fi
-          git commit -m "data: refresh compact market snapshots [skip ci]"
-          # A local sensor-data publish can race this workflow. Rebase and retry
-          # instead of losing a valid market refresh on a non-fast-forward push.
+
+          git commit -m "data: sync prices from ArzPulse [skip ci]"
+
           for attempt in 1 2 3; do
-            git pull --rebase origin main
+            git fetch origin main
+            if ! git rebase origin/main; then
+              echo "Rebase conflict on attempt $attempt; regenerating on latest main."
+              git rebase --abort || true
+              git reset --hard origin/main
+              python scripts/update_market_snapshot.py
+              git add market/
+              if git diff --cached --quiet; then
+                echo "Remote already contains an equal or newer snapshot."
+                exit 0
+              fi
+              git commit -m "data: sync prices from ArzPulse [skip ci]"
+            fi
+
             if git push origin HEAD:main; then
-              echo "Market snapshot pushed successfully."
+              echo "::notice::PySmartHome market snapshots published successfully."
               exit 0
             fi
-            echo "Push attempt ${attempt}/3 failed; retrying after a short delay."
-            sleep $((attempt * 3))
+
+            echo "Push attempt $attempt/3 failed; retrying against the latest main."
+            if [[ "$attempt" -lt 3 ]]; then sleep $((attempt * 3)); fi
           done
-          echo "::error::Could not publish market snapshot after three push attempts."
+
+          echo "::error::Market snapshot push failed after three attempts."
           exit 1
